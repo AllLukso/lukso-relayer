@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"os"
 
 	"github.com/Rask467/lukso-relayer/lsp"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/labstack/echo/v4"
 )
@@ -38,8 +40,6 @@ func Execute(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create client: %s", err))
 	}
 
-	// I think terq.Address is actually the address of the UP, so maybe I need to call into that first or retrieve the address
-	// 	of the key manager?
 	account, err := lsp.NewAccount(common.HexToAddress(terq.Address), client)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create Account: %s", err))
@@ -55,13 +55,21 @@ func Execute(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to create KeyManager: %s", err))
 	}
 
-	opts := &bind.TransactOpts{}
-
 	fmt.Println("Signature: ", terq.Transaction.Signature)
 	fmt.Println("Nonce: ", terq.Transaction.Nonce)
 	fmt.Println("Abi: ", terq.Transaction.Abi)
 
-	transaction, err := keyManager.ExecuteRelayCall(opts, []byte(terq.Transaction.Signature), big.NewInt(terq.Transaction.Nonce), []byte(terq.Transaction.Abi))
+	privateKey, err := crypto.HexToECDSA(os.Getenv("PK"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to load private key: %s", err))
+	}
+
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(2828))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create transactor")
+	}
+
+	transaction, err := keyManager.ExecuteRelayCall(auth, []byte(terq.Transaction.Signature), big.NewInt(terq.Transaction.Nonce), []byte(terq.Transaction.Abi))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to ExecuteRelayCall: %s", err))
 	}
