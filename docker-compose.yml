@@ -1,5 +1,0 @@
-services:
-  relayer:
-    build: .
-    ports:
-      - "1323:1323"
