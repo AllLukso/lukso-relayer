@@ -22,6 +22,7 @@ async function create(req, res, next) {
           }
         );
         const guid = uuid.v4();
+        console.log(guid);
         const user_verification = await db.one(
           "INSERT INTO user_verifications(guid, user_id) VALUES(${guid}, ${user_id}) RETURNING *",
           {
@@ -40,4 +41,26 @@ async function create(req, res, next) {
   }
 }
 
-module.exports = { create };
+async function verify(req, res, next) {
+  try {
+    const db = req.app.get("db");
+    const { guid } = req.params;
+
+    const userVerification = await db.one(
+      "SELECT user_id FROM user_verifications WHERE guid = $1",
+      guid
+    );
+
+    await db.none(
+      "UPDATE users SET verified = true WHERE id = $1",
+      userVerification.user_id
+    );
+
+    res.send("verified");
+  } catch (err) {
+    console.log(err);
+    return next("failed to verify user");
+  }
+}
+
+module.exports = { create, verify };

@@ -25,6 +25,7 @@ app.post("/v1/quota", transaction.quota);
 
 // User endpoints.
 app.post("/v1/user", user.create);
+app.get("/v1/user/verify/:guid", user.verify);
 
 // Error handler middleware should be last.
 app.use((err, req, res, next) => {

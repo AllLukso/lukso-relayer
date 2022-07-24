@@ -15,6 +15,9 @@ async function execute(req, res, next) {
     // TODO: query this user and check if they have any remaining gas.
     // const users = await db.any("SELECT * FROM users WHERE token = $1", [req.body.token]);
 
+    // TODO: When a user signs up for an account, I can have them sign a message with their private key and then I can verify that they own the account
+    //  Then I can store this account address in the db associated with the user knowing they control it.
+
     // TODO: Switch out for my own node(s)?
     const provider = new ethers.providers.JsonRpcProvider(
       "https://rpc.l16.lukso.network"
