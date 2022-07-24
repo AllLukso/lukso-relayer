@@ -1,0 +1,1 @@
+CREATE TABLE transaction_quotas(id SERIAL PRIMARY KEY, user_id INT, monthly_gas INT, gas_used INT, CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(id));

@@ -1,1 +1,1 @@
-CREATE TABLE users(id SERIAL PRIMARY KEY, email VARCHAR(500) UNIQUE, password TEXT, verified BOOLEAN);
+CREATE TABLE users(id SERIAL PRIMARY KEY, email VARCHAR(500) UNIQUE, password TEXT, verified BOOLEAN, token TEXT);

@@ -16,7 +16,7 @@ async function sendUserVerification(email, guid) {
 
   // send mail with defined transport object
   let info = await transporter.sendMail({
-    from: '"Fred Foo 👻" <foo@example.com>', // sender address
+    from: "verification@fourbyone.com", // sender address
     to: email, // list of receivers
     subject: "Verification ✔", // Subject line
     text: `Please verify with this guid: ${guid}`, // plain text body

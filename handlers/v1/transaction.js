@@ -8,15 +8,17 @@ const controllingAccountPrivateKey = process.env.PK;
 async function execute(req, res, next) {
   try {
     const db = req.app.get("db");
+    // TODO: It shouldn't be the UP that has a quota, rather a user who is signing the transaction?
+    const transactionQuota = await db.oneOrNone(
+      "SELECT monthly_gas, gas_used FROM universal_profiles as up JOIN users as u on u.id = up.user_id JOIN transaction_quotas as tq on tq.user_id = u.id WHERE up.address = $1",
+      req.body.address
+    );
 
-    // TODO: Recover the signers address from the signature, use this to authenticate them and the look them up in the DB
-    // Check to make sure they have enough gas to execute the transaciton and reduce their total available gas amount.
+    if (!transactionQuota)
+      throw "universal profile not found, please sign up and register your universal profile to execute requests";
 
-    // TODO: query this user and check if they have any remaining gas.
-    // const users = await db.any("SELECT * FROM users WHERE token = $1", [req.body.token]);
-
-    // TODO: When a user signs up for an account, I can have them sign a message with their private key and then I can verify that they own the account
-    //  Then I can store this account address in the db associated with the user knowing they control it.
+    if (transactionQuota.gas_used > transactionQuota.monthly_gas)
+      throw "over gas limit";
 
     // TODO: Switch out for my own node(s)?
     const provider = new ethers.providers.JsonRpcProvider(
@@ -25,13 +27,13 @@ async function execute(req, res, next) {
 
     const wallet = new ethers.Wallet(controllingAccountPrivateKey, provider);
 
-    const universalProfile = new ethers.Contract(
+    const universalProfileContract = new ethers.Contract(
       req.body.address,
       UniversalProfileContract.abi,
       wallet
     );
 
-    const keyManagerAddress = await universalProfile.owner();
+    const keyManagerAddress = await universalProfileContract.owner();
 
     const keyManager = new ethers.Contract(
       keyManagerAddress,
@@ -39,29 +41,26 @@ async function execute(req, res, next) {
       wallet
     );
 
-    const networkDetails = await provider.getNetwork();
-    const chainId = networkDetails.chainId;
-
-    const message = ethers.utils.soliditySha256(
-      ["uint256", "address", "uint256", "bytes"],
+    const message = ethers.utils.solidityKeccak256(
+      ["uint", "address", "uint", "bytes"],
       [
-        chainId,
+        2828,
         keyManagerAddress,
         req.body.transaction.nonce,
         req.body.transaction.abi,
       ]
     );
 
-    console.log("message: ", message);
-
+    // TODO: This is the address of the controlling account that signed this message.
+    // I should use this to look the user up in the database and get their quota info etc.
+    // Require this to be linked to a user in our database, and also require this user to have set up this UP as a profile they would like to send requests to.
     const signer = ethers.utils.verifyMessage(
       ethers.utils.arrayify(message),
       req.body.transaction.signature
     );
-
     console.log("signer: ", signer);
 
-    return;
+    return res.send("complete");
 
     // TODO: From the docs "Calculate and return transaction hash in response."
     // Maybe this means I just queue the transaction and manually calculate what the transaction hash will be.
