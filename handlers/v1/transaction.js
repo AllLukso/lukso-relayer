@@ -7,7 +7,15 @@ const controllingAccountPrivateKey = process.env.PK;
 
 async function execute(req, res, next) {
   try {
-    // Switch out for my own node(s)?
+    const db = req.app.get("db");
+
+    // TODO: Recover the signers address from the signature, use this to authenticate them and the look them up in the DB
+    // Check to make sure they have enough gas to execute the transaciton and reduce their total available gas amount.
+
+    // TODO: query this user and check if they have any remaining gas.
+    // const users = await db.any("SELECT * FROM users WHERE token = $1", [req.body.token]);
+
+    // TODO: Switch out for my own node(s)?
     const provider = new ethers.providers.JsonRpcProvider(
       "https://rpc.l16.lukso.network"
     );
@@ -28,8 +36,33 @@ async function execute(req, res, next) {
       wallet
     );
 
-    console.log(req.body);
+    const networkDetails = await provider.getNetwork();
+    const chainId = networkDetails.chainId;
 
+    const message = ethers.utils.soliditySha256(
+      ["uint256", "address", "uint256", "bytes"],
+      [
+        chainId,
+        keyManagerAddress,
+        req.body.transaction.nonce,
+        req.body.transaction.abi,
+      ]
+    );
+
+    console.log("message: ", message);
+
+    const signer = ethers.utils.verifyMessage(
+      ethers.utils.arrayify(message),
+      req.body.transaction.signature
+    );
+
+    console.log("signer: ", signer);
+
+    return;
+
+    // TODO: From the docs "Calculate and return transaction hash in response."
+    // Maybe this means I just queue the transaction and manually calculate what the transaction hash will be.
+    // Return this and then I can execute the transactions as I see fit.
     const executeRelayCallTransaction = await keyManager.executeRelayCall(
       req.body.transaction.signature,
       req.body.transaction.nonce,
