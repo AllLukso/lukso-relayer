@@ -4,8 +4,6 @@ const uuid = require("uuid");
 const saltRounds = 10;
 
 async function create(req, res, next) {
-  // TODO: Have the user sign a message with the controlling key of their universal profile and then verify that control the private key,
-  //    Once verified I can store that address in the database associated with thet user.
   try {
     const db = req.app.get("db");
     const { email, password, confirmPassword } = req.body;
