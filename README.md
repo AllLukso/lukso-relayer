@@ -10,6 +10,6 @@ Developer: Rask467 - rask46777@gmail.com
 
 Run `npm i` to install all dependencies.
 
-Add a private key to a `.env` file. An example is provided at `example.env`.
+Replace `example.env` with `.env` and fill in with values
 
 Run `node server.js` to start the server and make some requests!

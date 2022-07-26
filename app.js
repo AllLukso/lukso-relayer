@@ -18,6 +18,10 @@ const dbConnection = `postgres://${process.env.DB_USERNAME}:${process.env.DB_PAS
 const db = pgp(dbConnection);
 app.set("db", db);
 
+// Jobs.
+// Transaction jobs.
+require("./jobs/transaction/execute");
+
 // Passport.
 passport.use(
   new BearerStrategy(async function (token, done) {

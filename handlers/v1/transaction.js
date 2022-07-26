@@ -2,43 +2,46 @@ require("dotenv").config();
 const KeyManagerContract = require("@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json");
 const UniversalProfileContract = require("@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json");
 const ethers = require("ethers");
+const Queue = require("bull");
 
+const transactionQueue = new Queue(
+  "transaction-execution",
+  process.env.REDIS_URL
+);
+
+const chainId = process.env.CHAIN_ID;
+const rpcURL = process.env.RPC_URL;
 const controllingAccountPrivateKey = process.env.PK;
 
 async function execute(req, res, next) {
   try {
     const db = req.app.get("db");
-    // TODO: Switch out for my own node(s)?
-    const provider = new ethers.providers.JsonRpcProvider(
-      "https://rpc.l16.lukso.network"
-    );
-
+    const provider = new ethers.providers.JsonRpcProvider(rpcURL);
     const wallet = new ethers.Wallet(controllingAccountPrivateKey, provider);
+    const { address, transaction } = req.body;
 
     const universalProfileContract = new ethers.Contract(
-      req.body.address,
+      address,
       UniversalProfileContract.abi,
       wallet
     );
 
+    console.time("owner");
     const keyManagerAddress = await universalProfileContract.owner();
+    console.timeEnd("owner");
 
     const message = ethers.utils.solidityKeccak256(
       ["uint", "address", "uint", "bytes"],
-      [
-        2828,
-        keyManagerAddress,
-        req.body.transaction.nonce,
-        req.body.transaction.abi,
-      ]
+      [chainId, keyManagerAddress, transaction.nonce, transaction.abi]
     );
 
     const signerAddress = ethers.utils.verifyMessage(
       ethers.utils.arrayify(message),
-      req.body.transaction.signature
+      transaction.signature
     );
 
-    await db.task(async (t) => {
+    console.time("database");
+    const signer = await db.task(async (t) => {
       const signer = await t.oneOrNone(
         "SELECT * FROM signers WHERE address = $1",
         signerAddress
@@ -59,12 +62,14 @@ async function execute(req, res, next) {
         signer.user_id
       );
 
-      if (!transactionQuota)
-        throw "universal profile not found, please sign up and register your universal profile to execute requests";
+      if (!transactionQuota) throw "transaction quota not found";
 
       if (transactionQuota.gas_used > transactionQuota.monthly_gas)
         throw "over gas limit";
+
+      return signer;
     });
+    console.timeEnd("database");
 
     const keyManager = new ethers.Contract(
       keyManagerAddress,
@@ -72,19 +77,33 @@ async function execute(req, res, next) {
       wallet
     );
 
-    // TODO: From the docs "Calculate and return transaction hash in response."
-    // Maybe this means I just queue the transaction and manually calculate what the transaction hash will be.
-    // Return this and then I can execute the transactions as I see fit.
-    const executeRelayCallTransaction = await keyManager.executeRelayCall(
-      req.body.transaction.signature,
-      req.body.transaction.nonce,
-      req.body.transaction.abi
+    console.time("gas");
+    const estimatedGas = await keyManager.estimateGas.executeRelayCall(
+      transaction.signature,
+      transaction.nonce,
+      transaction.abi
     );
+    console.timeEnd("gas");
+    console.log("estimatedGas: ", estimatedGas.toNumber());
+
+    await db.none(
+      "UPDATE transaction_quotas SET gas_used = gas_used + $1 WHERE user_id = $2",
+      [estimatedGas.toNumber(), signer.user_id]
+    );
+
+    // TODO: This takes about 5 seconds, if we can stick this in a job that would be great, but need to figure out how to calculate the correct transaction hash AND ensure it is still the same
+    // When this actually executes.
+    console.time("call");
+    const executeRelayCallTransaction = await keyManager.executeRelayCall(
+      transaction.signature,
+      transaction.nonce,
+      transaction.abi
+    );
+    console.timeEnd("call");
 
     console.log(executeRelayCallTransaction);
 
-    // TODO: Use the gasLimit returned here to immediately decrement the "pending gas limit", if sending another transaction takes their pending limit down too low reject the transaction.
-    // Wait until their "pending gas limit" equals their actual "gas remaining" we can sync these values when the transaction confirms. We need to start a job to monitor this transaction and wait until it confirms?
+    // Enqueue a job here that will get the transaction receipt for this transaction and upate the actual gas used.
 
     res.json({ transactionHash: executeRelayCallTransaction.hash });
   } catch (err) {
