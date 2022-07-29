@@ -9,6 +9,7 @@ const transaction = require("./handlers/v1/transaction");
 const user = require("./handlers/v1/user");
 const universalProfile = require("./handlers/v1/universalProfile");
 const signers = require("./handlers/v1/signer");
+const transactionQuota = require("./handlers/v1/transaction_quotas");
 
 const app = express();
 
@@ -66,6 +67,9 @@ app.post(
   passport.authenticate("bearer", { session: false }),
   signers.create
 );
+
+// Transaction quota endpoints.
+app.post("/v1/transaction_quota", transactionQuota.create);
 
 // Error handler middleware should be last.
 app.use((err, req, res, next) => {

@@ -117,9 +117,10 @@ async function quota(req, res, next) {
     const db = req.app.get("db");
     const { address, timestamp, signature } = req.body;
 
-    // const now = new Date().getTime();
-    // const timeDiff = now - timestamp;
-    // if (timeDiff > 5 || timeDiff < -5) throw "timestamp must be +/- 5 seconds";
+    const now = new Date().getTime();
+    const timeDiff = now - timestamp;
+    if (timeDiff > 5000 || timeDiff < -5000)
+      throw "timestamp must be +/- 5 seconds";
 
     // const message = ethers.utils.solidityKeccak256(
     //   ["address", "uint"],
@@ -138,13 +139,13 @@ async function quota(req, res, next) {
       // );
       let transactionQuota;
       transactionQuota = await t.oneOrNone(
-        "SELECT * FROM transaction_quotas_UP WHERE universal_profile_address = $1",
+        "SELECT * FROM transaction_quotas WHERE owner_address = $1",
         address
       );
 
       if (!transactionQuota) {
         transactionQuota = await t.one(
-          "INSERT INTO transaction_quotas_UP(universal_profile_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
+          "INSERT INTO transaction_quotas(owner_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
           [address, 650000, 0]
         );
       }
@@ -182,23 +183,45 @@ async function execute_v2(req, res, next) {
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
-    let quota;
-    // TODO: Ok so every UP will by default get a certain gas limit, a specific signer can choose to purchase more and this will be only on their leve, i.e. they are the only ones who can use it.
-    // Have them sign a message to confirm they want to increase their quota.
-    await db.task(async (t) => {
-      quota = await t.oneOrNone(
-        "SELECT * FROM transaction_quotas_UP WHERE universal_profile_address = $1",
+    let quota = await db.task(async (t) => {
+      let tq;
+      tq = await t.oneOrNone(
+        "SELECT * FROM transaction_quotas WHERE owner_address = $1",
         address
       );
-      if (!quota) {
-        quota = await t.none(
-          "INSERT INTO transaction_quotas_UP(universal_profile_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
+      if (!tq) {
+        tq = await t.one(
+          "INSERT INTO transaction_quotas(owner_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
           [address, 650000, 0]
         );
       }
-      if (quota.gas_used >= quota.monthly_gas) throw "over gas limit";
+      return tq;
     });
-    // If we make it here we are not over the gas limit
+
+    let usingSignerQuota = false;
+    let signerAddress;
+    if (quota.gas_used >= quota.monthly_gas) {
+      // The UP has run out of gas, check if they have a signer with gas available.
+      const message = ethers.utils.solidityKeccak256(
+        ["uint", "address", "uint", "bytes"],
+        [chainId, keyManagerAddress, nonce, abi]
+      );
+
+      signerAddress = ethers.utils.verifyMessage(
+        ethers.utils.arrayify(message),
+        transaction.signature
+      );
+
+      // If this UP is over the gas limit then see if there is a signer registered to it that does have available gas.
+      quota = await db.oneOrNone(
+        "SELECT * FROM transaction_quotas WHERE owner_address = $1",
+        signerAddress
+      );
+      if (!quota || quota.gas_used >= quota.monthly_gas)
+        throw "out of gas, upgrade to a pro plan to increase gas limit";
+      usingSignerQuota = true;
+    }
+
     const provider = new ethers.providers.JsonRpcProvider(rpcURL);
     const wallet = new ethers.Wallet(privateKey, provider);
 
@@ -231,9 +254,10 @@ async function execute_v2(req, res, next) {
     if (quota.gas_used + estimatedGas > quota.monthly_gas)
       throw "transaction would exceed gas limit, upgrade to a pro plan to increase gas limit";
 
+    const updateAddress = usingSignerQuota ? signerAddress : address;
     await db.none(
-      "UPDATE transaction_quotas_UP SET gas_used = gas_used + $1 WHERE universal_profile_address = $2",
-      [estimatedGas, address]
+      "UPDATE transaction_quotas SET gas_used = gas_used + $1 WHERE owner_address = $2",
+      [estimatedGas, updateAddress]
     );
 
     const executeRelayCallTransaction = await keyManager.executeRelayCall(
@@ -246,6 +270,7 @@ async function execute_v2(req, res, next) {
     // This would be nice because I could calculate that and return it and then just queue the transaction and submit it whenever I want without worrying about the nonce of my wallet address.
     res.json({ transactionHash: executeRelayCallTransaction.hash });
   } catch (err) {
+    console.log(err);
     return next(err);
   }
 }
