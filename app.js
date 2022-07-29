@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const passport = require("passport");
 const BearerStrategy = require("passport-http-bearer");
+const cors = require("cors");
 
 // Handlers.
 const transaction = require("./handlers/v1/transaction");
@@ -21,6 +22,7 @@ app.set("db", db);
 // Jobs.
 // Transaction jobs.
 require("./jobs/transaction/execute");
+require("./jobs/email/userVerification");
 
 // Passport.
 passport.use(
@@ -37,15 +39,19 @@ passport.use(
 
 // Middleware.
 app.use(express.json());
+// TODO: Restrict this to only the front end app.
+app.use(cors());
 
 // Transaction endpoints.
-app.post("/v1/execute", transaction.execute);
+app.post("/v1/execute", transaction.execute_v2);
 app.post("/v1/quota", transaction.quota);
 
 // User endpoints.
 app.post("/v1/user", user.create);
 app.post("/v1/user/login", user.login);
 app.get("/v1/user/verify/:guid", user.verify);
+app.get("/v1/user/:email", user.get);
+app.post("/v1/user/resend_verification", user.resendVerification);
 
 // Universal profile endpoints.
 app.post(

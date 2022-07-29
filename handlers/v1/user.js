@@ -1,7 +1,13 @@
 const bcrypt = require("bcrypt");
-const emailService = require("../../services/email");
 const uuid = require("uuid");
 const saltRounds = 10;
+const Queue = require("bull");
+require("dotenv").config();
+
+const userVerificationQueue = new Queue(
+  "user-verification",
+  process.env.REDIS_URL
+);
 
 async function create(req, res, next) {
   try {
@@ -40,7 +46,7 @@ async function create(req, res, next) {
           return guid;
         })
           .then((guid) => {
-            emailService.sendUserVerification(email, guid);
+            userVerificationQueue.add({ email, guid });
             res.send("user created");
           })
           .catch((err) => {
@@ -81,7 +87,10 @@ async function verify(req, res, next) {
       return authToken;
     })
       .then((authToken) => {
-        res.json({ authToken });
+        // TODO: Need to redirect the the users dashboard and save the auth token in storage.
+        res.redirect(
+          `${process.env.FRONTEND_HOST}/dashboard?authToken=${authToken}`
+        );
       })
       .catch((err) => {
         console.log(err);
@@ -122,4 +131,48 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { create, verify, login };
+async function get(req, res, next) {
+  try {
+    const db = req.app.get("db");
+    const { email } = req.params;
+
+    const user = await db.one("SELECT * FROM users WHERE email = $1", email);
+
+    res.json(user);
+  } catch (err) {
+    console.log(err);
+    return next("failed to get user");
+  }
+}
+
+async function resendVerification(req, res, next) {
+  try {
+    const db = req.app.get("db");
+    const { email } = req.body;
+
+    await db.task(async (t) => {
+      const user = await t.oneOrNone(
+        "SELECT * FROM users WHERE email = $1",
+        email
+      );
+      if (!user) throw "failed to find user";
+      await t.none(
+        "DELETE FROM user_verifications WHERE user_id = $1",
+        user.id
+      );
+      const guid = uuid.v4();
+      await t.none(
+        "INSERT INTO user_verifications(guid, user_id) VALUES($1, $2)",
+        [guid, user.id]
+      );
+      userVerificationQueue.add({ email, guid });
+    });
+
+    res.send("verification sent");
+  } catch (err) {
+    console.log(err);
+    return next(err);
+  }
+}
+
+module.exports = { create, get, verify, login, resendVerification };

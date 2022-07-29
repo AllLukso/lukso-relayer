@@ -1,0 +1,1 @@
+CREATE TABLE transaction_quotas(id SERIAL PRIMARY KEY, universal_profile_address VARCHAR(60) UNIQUE, monthly_gas INT, gas_used INT);
