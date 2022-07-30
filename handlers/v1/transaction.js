@@ -122,21 +122,17 @@ async function quota(req, res, next) {
     if (timeDiff > 5000 || timeDiff < -5000)
       throw "timestamp must be +/- 5 seconds";
 
-    // const message = ethers.utils.solidityKeccak256(
-    //   ["address", "uint"],
-    //   [address, timestamp]
-    // );
+    const message = ethers.utils.solidityKeccak256(
+      ["address", "uint"],
+      [address, timestamp]
+    );
 
-    // const signerAddress = ethers.utils.verifyMessage(
-    //   ethers.utils.arrayify(message),
-    //   signature
-    // );
+    const signerAddress = ethers.utils.verifyMessage(
+      ethers.utils.arrayify(message),
+      signature
+    );
 
     const transactionQuota = await db.task(async (t) => {
-      // const signer = await t.one(
-      //   "SELECT * FROM signers WHERE address = $1",
-      //   signerAddress
-      // );
       let transactionQuota;
       transactionQuota = await t.oneOrNone(
         "SELECT * FROM transaction_quotas WHERE owner_address = $1",
@@ -149,12 +145,21 @@ async function quota(req, res, next) {
           [address, 650000, 0]
         );
       }
-      // TODO: Need to also query for the singer and see if they ahve a quota, and add that to the free UP level quota to return their "totalQuota"
-      return transactionQuota;
+
+      if (signerAddress === address) return transactionQuota;
+
+      const signerQuota = await t.oneOrNone(
+        "SELECT * FROM transaction_quotas WHERE owner_address = $1",
+        signerAddress
+      );
+
+      return {
+        gas_used: transactionQuota.gas_used + signerQuota.gas_used,
+        monthly_gas: transactionQuota.monthly_gas + signerQuota.monthly_gas,
+      };
     });
 
     const date = new Date();
-
     const firstOfNextMonth = new Date(
       date.getFullYear(),
       date.getMonth() + 1,
@@ -183,6 +188,23 @@ async function execute_v2(req, res, next) {
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
+
+    const provider = new ethers.providers.JsonRpcProvider(rpcURL);
+    const wallet = new ethers.Wallet(privateKey, provider);
+
+    const universalProfileContract = new ethers.Contract(
+      address,
+      UniversalProfileContract.abi,
+      wallet
+    );
+
+    const keyManagerAddress = await universalProfileContract.owner();
+    const keyManager = new ethers.Contract(
+      keyManagerAddress,
+      KeyManagerContract.abi,
+      wallet
+    );
+
     let quota = await db.task(async (t) => {
       let tq;
       tq = await t.oneOrNone(
@@ -209,7 +231,7 @@ async function execute_v2(req, res, next) {
 
       signerAddress = ethers.utils.verifyMessage(
         ethers.utils.arrayify(message),
-        transaction.signature
+        signature
       );
 
       // If this UP is over the gas limit then see if there is a signer registered to it that does have available gas.
@@ -221,22 +243,6 @@ async function execute_v2(req, res, next) {
         throw "out of gas, upgrade to a pro plan to increase gas limit";
       usingSignerQuota = true;
     }
-
-    const provider = new ethers.providers.JsonRpcProvider(rpcURL);
-    const wallet = new ethers.Wallet(privateKey, provider);
-
-    const universalProfileContract = new ethers.Contract(
-      address,
-      UniversalProfileContract.abi,
-      wallet
-    );
-
-    const keyManagerAddress = await universalProfileContract.owner();
-    const keyManager = new ethers.Contract(
-      keyManagerAddress,
-      KeyManagerContract.abi,
-      wallet
-    );
 
     console.log("keyManagerAddress: ", keyManagerAddress);
     console.log("address: ", address);

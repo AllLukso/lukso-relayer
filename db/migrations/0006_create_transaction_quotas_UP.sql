@@ -1,1 +1,1 @@
-CREATE TABLE transaction_quotas(id SERIAL PRIMARY KEY, owner_address VARCHAR(60) UNIQUE, monthly_gas INT, gas_used INT);
+CREATE TABLE transaction_quotas(id SERIAL PRIMARY KEY, owner_address VARCHAR(60) UNIQUE, monthly_gas INT, gas_used INT, created_at TIMESTAMP, updated_at TIMESTAMP);
