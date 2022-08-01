@@ -3,21 +3,20 @@ const KeyManagerContract = require("@lukso/lsp-smart-contracts/artifacts/LSP6Key
 const UniversalProfileContract = require("@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json");
 const ethers = require("ethers");
 const Queue = require("bull");
+const CHAIN_ID = process.env.CHAIN_ID;
+const RPC_URL = process.env.RPC_URL;
+const PRIVATE_KEY = process.env.PK;
 
 const transactionQueue = new Queue(
   "transaction-execution",
   process.env.REDIS_URL
 );
 
-const chainId = process.env.CHAIN_ID;
-const rpcURL = process.env.RPC_URL;
-const privateKey = process.env.PK;
-
 async function execute(req, res, next) {
   try {
     const db = req.app.get("db");
-    const provider = new ethers.providers.JsonRpcProvider(rpcURL);
-    const wallet = new ethers.Wallet(privateKey, provider);
+    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+    const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
     const { address, transaction } = req.body;
 
     const universalProfileContract = new ethers.Contract(
@@ -30,9 +29,11 @@ async function execute(req, res, next) {
     const keyManagerAddress = await universalProfileContract.owner();
     console.timeEnd("owner");
 
+    // TODO: may need to extract the channelId and nonce from the transaction.nonce, then check to make sure I don't try to submit out of order nonces on the same channel?
+    // First 128 bits of the nonce are the channelId and last 128 bits are the actual nonce.
     const message = ethers.utils.solidityKeccak256(
       ["uint", "address", "uint", "bytes"],
-      [chainId, keyManagerAddress, transaction.nonce, transaction.abi]
+      [CHAIN_ID, keyManagerAddress, transaction.nonce, transaction.abi]
     );
 
     const signerAddress = ethers.utils.verifyMessage(
@@ -180,7 +181,6 @@ async function quota(req, res, next) {
 
 async function execute_v2(req, res, next) {
   try {
-    // Verify all params
     const {
       address,
       transaction: { nonce, abi, signature },
@@ -188,67 +188,20 @@ async function execute_v2(req, res, next) {
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
-
-    const provider = new ethers.providers.JsonRpcProvider(rpcURL);
-    const wallet = new ethers.Wallet(privateKey, provider);
+    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+    const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 
     const universalProfileContract = new ethers.Contract(
       address,
       UniversalProfileContract.abi,
       wallet
     );
-
     const keyManagerAddress = await universalProfileContract.owner();
     const keyManager = new ethers.Contract(
       keyManagerAddress,
       KeyManagerContract.abi,
       wallet
     );
-
-    let quota = await db.task(async (t) => {
-      let tq;
-      tq = await t.oneOrNone(
-        "SELECT * FROM transaction_quotas WHERE owner_address = $1",
-        address
-      );
-      if (!tq) {
-        tq = await t.one(
-          "INSERT INTO transaction_quotas(owner_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
-          [address, 650000, 0]
-        );
-      }
-      return tq;
-    });
-
-    let usingSignerQuota = false;
-    let signerAddress;
-    if (quota.gas_used >= quota.monthly_gas) {
-      // The UP has run out of gas, check if they have a signer with gas available.
-      const message = ethers.utils.solidityKeccak256(
-        ["uint", "address", "uint", "bytes"],
-        [chainId, keyManagerAddress, nonce, abi]
-      );
-
-      signerAddress = ethers.utils.verifyMessage(
-        ethers.utils.arrayify(message),
-        signature
-      );
-
-      // If this UP is over the gas limit then see if there is a signer registered to it that does have available gas.
-      quota = await db.oneOrNone(
-        "SELECT * FROM transaction_quotas WHERE owner_address = $1",
-        signerAddress
-      );
-      if (!quota || quota.gas_used >= quota.monthly_gas)
-        throw "out of gas, upgrade to a pro plan to increase gas limit";
-      usingSignerQuota = true;
-    }
-
-    console.log("keyManagerAddress: ", keyManagerAddress);
-    console.log("address: ", address);
-    console.log("signature: ", signature);
-    console.log("nonce: ", nonce);
-    console.log("abi: ", abi);
 
     const estimatedGasBN = await keyManager.estimateGas.executeRelayCall(
       signature,
@@ -257,24 +210,41 @@ async function execute_v2(req, res, next) {
     );
     const estimatedGas = estimatedGasBN.toNumber();
 
-    if (quota.gas_used + estimatedGas > quota.monthly_gas)
-      throw "transaction would exceed gas limit, upgrade to a pro plan to increase gas limit";
-
-    const updateAddress = usingSignerQuota ? signerAddress : address;
-    await db.none(
-      "UPDATE transaction_quotas SET gas_used = gas_used + $1 WHERE owner_address = $2",
-      [estimatedGas, updateAddress]
+    await db.task((t) =>
+      ensureRemainingQuota(
+        t,
+        estimatedGas,
+        address,
+        keyManagerAddress,
+        nonce,
+        abi,
+        signature
+      )
     );
 
-    const executeRelayCallTransaction = await keyManager.executeRelayCall(
-      signature,
-      nonce,
-      abi
-    );
+    // TODO: Doing all this extra work to populate X2, sign, and parse, the transaction almost equals the amount of time to just submit and wait for it to come back...
+    // const unsignedTx = await keyManager.populateTransaction.executeRelayCall(
+    //   signature,
+    //   nonce,
+    //   abi
+    // );
 
-    // TODO: Ok maybe this is the wrong hash. Maybe I can just calculate the hash of the transaction that will be executed on the KeyManager and ignore the has of the transaction my EOA is submitting?
-    // This would be nice because I could calculate that and return it and then just queue the transaction and submit it whenever I want without worrying about the nonce of my wallet address.
-    res.json({ transactionHash: executeRelayCallTransaction.hash });
+    // const populatedUnsignedTx = await wallet.populateTransaction(unsignedTx);
+    // const signedTx = await keyManager.signer.signTransaction(
+    //   populatedUnsignedTx
+    // );
+    // const parsedTx = ethers.utils.parseTransaction(signedTx);
+    // console.log("parsedTx: ", parsedTx);
+
+    // TODO: I think I can use a KeyManager to submit my transactions, then I would be able to create a nonce and assign it to the transaction to be used and it won't conflict with any other transactions going out.
+    // 1. Create a UP for the relayer to use
+    // 2. Store the signers private key
+    // 3. Store "pending transactions" in the database with a random nonce assigned to them.
+    // 4. When executing these transactions they won't conflict with each other on my UP.
+
+    const tx = await keyManager.executeRelayCall(signature, nonce, abi);
+
+    res.json({ transactionHash: tx.hash });
   } catch (err) {
     console.log(err);
     return next(err);
@@ -287,6 +257,60 @@ function validateExecuteParams(address, nonce, abi, signature) {
   if (abi === undefined || abi === "") throw "abi must be present";
   if (signature === undefined || signature === "")
     throw "signature must be present";
+}
+
+async function ensureRemainingQuota(
+  t,
+  estimatedGas,
+  address,
+  keyManagerAddress,
+  nonce,
+  abi,
+  signature
+) {
+  let usingSignerQuota = false;
+  let signerAddress;
+  let tq;
+  tq = await t.oneOrNone(
+    "SELECT * FROM transaction_quotas WHERE owner_address = $1",
+    address
+  );
+  if (!tq) {
+    tq = await t.one(
+      "INSERT INTO transaction_quotas(owner_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
+      [address, 650000, 0]
+    );
+  }
+
+  if (tq.gas_used + estimatedGas > tq.monthly_gas) {
+    // The UP has run out of gas, check if they have a signer with gas available.
+    const message = ethers.utils.solidityKeccak256(
+      ["uint", "address", "uint", "bytes"],
+      [CHAIN_ID, keyManagerAddress, nonce, abi]
+    );
+
+    signerAddress = ethers.utils.verifyMessage(
+      ethers.utils.arrayify(message),
+      signature
+    );
+
+    // If this UP is over the gas limit then see if there is a signer registered to it that does have available gas.
+    tq = await t.oneOrNone(
+      "SELECT * FROM transaction_quotas WHERE owner_address = $1",
+      signerAddress
+    );
+    if (!tq) throw "out of gas, upgrade to a pro plan to increase gas limit";
+    usingSignerQuota = true;
+  }
+
+  if (tq.gas_used + estimatedGas > tq.monthly_gas)
+    throw "transaction would exceed gas limit, upgrade to a pro plan to increase gas limit";
+
+  const updateAddress = usingSignerQuota ? signerAddress : address;
+  await t.none(
+    "UPDATE transaction_quotas SET gas_used = gas_used + $1 WHERE owner_address = $2",
+    [estimatedGas, updateAddress]
+  );
 }
 
 module.exports = { execute, quota, execute_v2 };

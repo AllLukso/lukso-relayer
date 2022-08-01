@@ -5,12 +5,8 @@ async function create(req, res, next) {
     const { address, signature } = req.body;
     if (address === "" || address === undefined)
       throw "address must be present";
-    // Ensure they own the address they are wanting to create a quota for.
-    // The UP has run out of gas, check if they have a signer with gas available.
     const message = ethers.utils.solidityKeccak256(["address"], [address]);
 
-    console.log("signature: ", signature);
-    console.log("address: ", address);
     const signerAddress = ethers.utils.verifyMessage(
       ethers.utils.arrayify(message),
       signature

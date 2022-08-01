@@ -1,6 +1,8 @@
-const ethers = require("ethers");
+import ethers from "ethers";
+import { Request, Response, NextFunction } from "express";
+import PG from "pg-promise";
 
-async function create(req, res, next) {
+async function create(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const { address, signature } = req.body;
@@ -15,10 +17,11 @@ async function create(req, res, next) {
 
     if (address !== signer) throw "not address owner";
 
-    await db.task(async (t) => {
+    let user = req.user as User;
+    await db.task(async (t: PG.ITask<{}>) => {
       await t.none("INSERT INTO signers(address, user_id) VALUES($1, $2)", [
         address,
-        req.user.id,
+        user.id,
       ]);
     });
 
