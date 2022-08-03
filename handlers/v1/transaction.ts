@@ -1,22 +1,26 @@
 require("dotenv").config();
-const KeyManagerContract = require("@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json");
-const UniversalProfileContract = require("@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json");
-const ethers = require("ethers");
-const Queue = require("bull");
+import KeyManagerContract from "@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json";
+import UniversalProfileContract from "@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json";
+import PG from "pg-promise";
+import { Request, Response, NextFunction } from "express";
+import ethers from "ethers";
+import Queue from "bull";
 const CHAIN_ID = process.env.CHAIN_ID;
 const RPC_URL = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PK;
 
-const transactionQueue = new Queue(
-  "transaction-execution",
-  process.env.REDIS_URL
-);
+const transactionQueue = new Queue("transaction-execution", {
+  redis: { port: 6379, host: process.env.REDIS_HOST },
+});
 
-async function execute(req, res, next) {
+async function execute(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+    const wallet = new ethers.Wallet(
+      ethers.utils.formatBytes32String(PRIVATE_KEY!),
+      provider
+    );
     const { address, transaction } = req.body;
 
     const universalProfileContract = new ethers.Contract(
@@ -42,7 +46,7 @@ async function execute(req, res, next) {
     );
 
     console.time("database");
-    const signer = await db.task(async (t) => {
+    const signer = await db.task(async (t: PG.ITask<{}>) => {
       const signer = await t.oneOrNone(
         "SELECT * FROM signers WHERE address = $1",
         signerAddress
@@ -113,7 +117,7 @@ async function execute(req, res, next) {
   }
 }
 
-async function quota(req, res, next) {
+async function quota(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const { address, timestamp, signature } = req.body;
@@ -133,7 +137,7 @@ async function quota(req, res, next) {
       signature
     );
 
-    const transactionQuota = await db.task(async (t) => {
+    const transactionQuota = await db.task(async (t: PG.ITask<{}>) => {
       let transactionQuota;
       transactionQuota = await t.oneOrNone(
         "SELECT * FROM transaction_quotas WHERE owner_address = $1",
@@ -179,7 +183,7 @@ async function quota(req, res, next) {
   }
 }
 
-async function execute_v2(req, res, next) {
+async function execute_v2(req: Request, res: Response, next: NextFunction) {
   try {
     const {
       address,
@@ -189,7 +193,10 @@ async function execute_v2(req, res, next) {
 
     const db = req.app.get("db");
     const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+    const wallet = new ethers.Wallet(
+      ethers.utils.formatBytes32String(PRIVATE_KEY!),
+      provider
+    );
 
     const universalProfileContract = new ethers.Contract(
       address,
@@ -210,7 +217,7 @@ async function execute_v2(req, res, next) {
     );
     const estimatedGas = estimatedGasBN.toNumber();
 
-    await db.task((t) =>
+    await db.task((t: PG.ITask<{}>) =>
       ensureRemainingQuota(
         t,
         estimatedGas,
@@ -251,7 +258,12 @@ async function execute_v2(req, res, next) {
   }
 }
 
-function validateExecuteParams(address, nonce, abi, signature) {
+function validateExecuteParams(
+  address: string,
+  nonce: number,
+  abi: string,
+  signature: string
+) {
   if (address === undefined || address === "") throw "address must be present";
   if (nonce === undefined) throw "nonce must be present";
   if (abi === undefined || abi === "") throw "abi must be present";
@@ -260,13 +272,13 @@ function validateExecuteParams(address, nonce, abi, signature) {
 }
 
 async function ensureRemainingQuota(
-  t,
-  estimatedGas,
-  address,
-  keyManagerAddress,
-  nonce,
-  abi,
-  signature
+  t: PG.ITask<{}>,
+  estimatedGas: number,
+  address: string,
+  keyManagerAddress: string,
+  nonce: number,
+  abi: string,
+  signature: string
 ) {
   let usingSignerQuota = false;
   let signerAddress;

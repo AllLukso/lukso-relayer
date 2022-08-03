@@ -17,11 +17,10 @@ async function create(req: Request, res: Response, next: NextFunction) {
 
     if (address !== signer) throw "not address owner";
 
-    let user = req.user as User;
     await db.task(async (t: PG.ITask<{}>) => {
       await t.none("INSERT INTO signers(address, user_id) VALUES($1, $2)", [
         address,
-        user.id,
+        req.user.id,
       ]);
     });
 

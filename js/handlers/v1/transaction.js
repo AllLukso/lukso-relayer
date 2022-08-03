@@ -8,30 +8,36 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv").config();
-const KeyManagerContract = require("@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json");
-const UniversalProfileContract = require("@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json");
-const ethers = require("ethers");
-const Queue = require("bull");
+const LSP6KeyManager_json_1 = __importDefault(require("@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json"));
+const UniversalProfile_json_1 = __importDefault(require("@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json"));
+const ethers_1 = __importDefault(require("ethers"));
+const bull_1 = __importDefault(require("bull"));
 const CHAIN_ID = process.env.CHAIN_ID;
 const RPC_URL = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PK;
-const transactionQueue = new Queue("transaction-execution", process.env.REDIS_URL);
+const transactionQueue = new bull_1.default("transaction-execution", {
+    redis: { port: 6379, host: process.env.REDIS_HOST },
+});
 function execute(req, res, next) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const db = req.app.get("db");
-            const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-            const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+            const provider = new ethers_1.default.providers.JsonRpcProvider(RPC_URL);
+            const wallet = new ethers_1.default.Wallet(ethers_1.default.utils.formatBytes32String(PRIVATE_KEY), provider);
             const { address, transaction } = req.body;
-            const universalProfileContract = new ethers.Contract(address, UniversalProfileContract.abi, wallet);
+            const universalProfileContract = new ethers_1.default.Contract(address, UniversalProfile_json_1.default.abi, wallet);
             console.time("owner");
             const keyManagerAddress = yield universalProfileContract.owner();
             console.timeEnd("owner");
             // TODO: may need to extract the channelId and nonce from the transaction.nonce, then check to make sure I don't try to submit out of order nonces on the same channel?
             // First 128 bits of the nonce are the channelId and last 128 bits are the actual nonce.
-            const message = ethers.utils.solidityKeccak256(["uint", "address", "uint", "bytes"], [CHAIN_ID, keyManagerAddress, transaction.nonce, transaction.abi]);
-            const signerAddress = ethers.utils.verifyMessage(ethers.utils.arrayify(message), transaction.signature);
+            const message = ethers_1.default.utils.solidityKeccak256(["uint", "address", "uint", "bytes"], [CHAIN_ID, keyManagerAddress, transaction.nonce, transaction.abi]);
+            const signerAddress = ethers_1.default.utils.verifyMessage(ethers_1.default.utils.arrayify(message), transaction.signature);
             console.time("database");
             const signer = yield db.task((t) => __awaiter(this, void 0, void 0, function* () {
                 const signer = yield t.oneOrNone("SELECT * FROM signers WHERE address = $1", signerAddress);
@@ -48,7 +54,7 @@ function execute(req, res, next) {
                 return signer;
             }));
             console.timeEnd("database");
-            const keyManager = new ethers.Contract(keyManagerAddress, KeyManagerContract.abi, wallet);
+            const keyManager = new ethers_1.default.Contract(keyManagerAddress, LSP6KeyManager_json_1.default.abi, wallet);
             console.time("gas");
             const estimatedGas = yield keyManager.estimateGas.executeRelayCall(transaction.signature, transaction.nonce, transaction.abi);
             console.timeEnd("gas");
@@ -78,8 +84,8 @@ function quota(req, res, next) {
             const timeDiff = now - timestamp;
             if (timeDiff > 5000 || timeDiff < -5000)
                 throw "timestamp must be +/- 5 seconds";
-            const message = ethers.utils.solidityKeccak256(["address", "uint"], [address, timestamp]);
-            const signerAddress = ethers.utils.verifyMessage(ethers.utils.arrayify(message), signature);
+            const message = ethers_1.default.utils.solidityKeccak256(["address", "uint"], [address, timestamp]);
+            const signerAddress = ethers_1.default.utils.verifyMessage(ethers_1.default.utils.arrayify(message), signature);
             const transactionQuota = yield db.task((t) => __awaiter(this, void 0, void 0, function* () {
                 let transactionQuota;
                 transactionQuota = yield t.oneOrNone("SELECT * FROM transaction_quotas WHERE owner_address = $1", address);
@@ -115,11 +121,11 @@ function execute_v2(req, res, next) {
             const { address, transaction: { nonce, abi, signature }, } = req.body;
             validateExecuteParams(address, nonce, abi, signature);
             const db = req.app.get("db");
-            const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-            const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
-            const universalProfileContract = new ethers.Contract(address, UniversalProfileContract.abi, wallet);
+            const provider = new ethers_1.default.providers.JsonRpcProvider(RPC_URL);
+            const wallet = new ethers_1.default.Wallet(ethers_1.default.utils.formatBytes32String(PRIVATE_KEY), provider);
+            const universalProfileContract = new ethers_1.default.Contract(address, UniversalProfile_json_1.default.abi, wallet);
             const keyManagerAddress = yield universalProfileContract.owner();
-            const keyManager = new ethers.Contract(keyManagerAddress, KeyManagerContract.abi, wallet);
+            const keyManager = new ethers_1.default.Contract(keyManagerAddress, LSP6KeyManager_json_1.default.abi, wallet);
             const estimatedGasBN = yield keyManager.estimateGas.executeRelayCall(signature, nonce, abi);
             const estimatedGas = estimatedGasBN.toNumber();
             yield db.task((t) => ensureRemainingQuota(t, estimatedGas, address, keyManagerAddress, nonce, abi, signature));
@@ -170,8 +176,8 @@ function ensureRemainingQuota(t, estimatedGas, address, keyManagerAddress, nonce
         }
         if (tq.gas_used + estimatedGas > tq.monthly_gas) {
             // The UP has run out of gas, check if they have a signer with gas available.
-            const message = ethers.utils.solidityKeccak256(["uint", "address", "uint", "bytes"], [CHAIN_ID, keyManagerAddress, nonce, abi]);
-            signerAddress = ethers.utils.verifyMessage(ethers.utils.arrayify(message), signature);
+            const message = ethers_1.default.utils.solidityKeccak256(["uint", "address", "uint", "bytes"], [CHAIN_ID, keyManagerAddress, nonce, abi]);
+            signerAddress = ethers_1.default.utils.verifyMessage(ethers_1.default.utils.arrayify(message), signature);
             // If this UP is over the gas limit then see if there is a signer registered to it that does have available gas.
             tq = yield t.oneOrNone("SELECT * FROM transaction_quotas WHERE owner_address = $1", signerAddress);
             if (!tq)

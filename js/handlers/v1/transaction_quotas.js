@@ -8,15 +8,19 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-const ethers = require("ethers");
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const ethers_1 = __importDefault(require("ethers"));
 function create(req, res, next) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const { address, signature } = req.body;
             if (address === "" || address === undefined)
                 throw "address must be present";
-            const message = ethers.utils.solidityKeccak256(["address"], [address]);
-            const signerAddress = ethers.utils.verifyMessage(ethers.utils.arrayify(message), signature);
+            const message = ethers_1.default.utils.solidityKeccak256(["address"], [address]);
+            const signerAddress = ethers_1.default.utils.verifyMessage(ethers_1.default.utils.arrayify(message), signature);
             if (signerAddress !== address)
                 throw "only owner can add to transaction quota";
             const db = req.app.get("db");

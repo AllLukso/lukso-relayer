@@ -8,10 +8,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv").config();
-const Queue = require("bull");
+const bull_1 = __importDefault(require("bull"));
 const emailService = require("../../services/email");
-const userVerificationQueue = new Queue("user-verification", process.env.REDIS_URL);
+const userVerificationQueue = new bull_1.default("user-verification", process.env.REDIS_URL);
 userVerificationQueue.process((job) => __awaiter(void 0, void 0, void 0, function* () {
     const { email, guid } = job.data;
     yield emailService.sendUserVerification(email, guid);

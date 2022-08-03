@@ -1,17 +1,18 @@
+import Queue from "bull";
+
 require("dotenv").config();
-const Queue = require("bull");
 const KeyManagerContract = require("@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json");
 const ethers = require("ethers");
 
 const transactionQueue = new Queue(
   "transaction-execution",
-  process.env.REDIS_URL
+  process.env.REDIS_URL!
 );
 
 const controllingAccountPrivateKey = process.env.PK;
 const rpcURL = process.env.RPC_URL;
 
-transactionQueue.process(async (job) => {
+transactionQueue.process(async (job: Queue.Job) => {
   const provider = new ethers.providers.JsonRpcProvider(rpcURL);
   const wallet = new ethers.Wallet(controllingAccountPrivateKey, provider);
   const { keyManagerAddress, transaction } = job.data;

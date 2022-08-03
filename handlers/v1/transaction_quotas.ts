@@ -1,6 +1,7 @@
-const ethers = require("ethers");
+import ethers from "ethers";
+import { Request, Response, NextFunction } from "express";
 
-async function create(req, res, next) {
+async function create(req: Request, res: Response, next: NextFunction) {
   try {
     const { address, signature } = req.body;
     if (address === "" || address === undefined)

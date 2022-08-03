@@ -8,11 +8,15 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const bull_1 = __importDefault(require("bull"));
 require("dotenv").config();
-const Queue = require("bull");
 const KeyManagerContract = require("@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json");
 const ethers = require("ethers");
-const transactionQueue = new Queue("transaction-execution", process.env.REDIS_URL);
+const transactionQueue = new bull_1.default("transaction-execution", process.env.REDIS_URL);
 const controllingAccountPrivateKey = process.env.PK;
 const rpcURL = process.env.RPC_URL;
 transactionQueue.process((job) => __awaiter(void 0, void 0, void 0, function* () {

@@ -1,4 +1,6 @@
-async function create(req, res, next) {
+import { Request, Response, NextFunction } from "express";
+
+async function create(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
 
@@ -6,7 +8,7 @@ async function create(req, res, next) {
 
     const universalProfile = await db.one(
       "INSERT INTO universal_profiles(address, user_id) VALUES($1, $2) RETURNING *",
-      [universalProfileAddress, req.user.id]
+      [universalProfileAddress, req.user!.id]
     );
 
     res.json(universalProfile);

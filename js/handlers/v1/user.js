@@ -8,12 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-const bcrypt = require("bcrypt");
-const uuid = require("uuid");
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const bcrypt_1 = __importDefault(require("bcrypt"));
+const uuid_1 = __importDefault(require("uuid"));
 const saltRounds = 10;
-const Queue = require("bull");
-require("dotenv").config();
-const userVerificationQueue = new Queue("user-verification", process.env.REDIS_URL);
+const bull_1 = __importDefault(require("bull"));
+const dotenv_1 = __importDefault(require("dotenv"));
+dotenv_1.default.config();
+const userVerificationQueue = new bull_1.default("user-verification", process.env.REDIS_URL);
 function create(req, res, next) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
@@ -23,7 +28,7 @@ function create(req, res, next) {
                 throw "passwords do not match";
             if (email == "")
                 throw "email can not be blank";
-            bcrypt.hash(password, saltRounds, function (err, hash) {
+            bcrypt_1.default.hash(password, saltRounds, function (err, hash) {
                 return __awaiter(this, void 0, void 0, function* () {
                     try {
                         db.task((t) => __awaiter(this, void 0, void 0, function* () {
@@ -32,7 +37,7 @@ function create(req, res, next) {
                                 password: hash,
                                 verified: false,
                             });
-                            const guid = uuid.v4();
+                            const guid = uuid_1.default.v4();
                             console.log(guid);
                             const user_verification = yield t.one("INSERT INTO user_verifications(guid, user_id) VALUES(${guid}, ${user_id}) RETURNING *", {
                                 guid: guid,
@@ -70,7 +75,7 @@ function verify(req, res, next) {
                 const userVerification = yield t.one("SELECT user_id FROM user_verifications WHERE guid = $1", guid);
                 yield t.none("UPDATE users SET verified = true WHERE id = $1", userVerification.user_id);
                 yield t.none("DELETE FROM user_verifications WHERE guid = $1", guid);
-                const authToken = uuid.v4();
+                const authToken = uuid_1.default.v4();
                 yield t.none("UPDATE users SET token = $1 WHERE id = $2", [
                     authToken,
                     userVerification.user_id,
@@ -101,9 +106,9 @@ function login(req, res, next) {
                 const user = yield t.one("SELECT * FROM users WHERE email = $1", email);
                 if (!user.verified)
                     return next("user not verified");
-                const match = yield bcrypt.compare(password, user.password);
+                const match = yield bcrypt_1.default.compare(password, user.password);
                 if (match) {
-                    const authToken = uuid.v4();
+                    const authToken = uuid_1.default.v4();
                     yield t.none("UPDATE users SET token = $1 WHERE id = $2", [
                         authToken,
                         user.id,
@@ -145,7 +150,7 @@ function resendVerification(req, res, next) {
                 if (!user)
                     throw "failed to find user";
                 yield t.none("DELETE FROM user_verifications WHERE user_id = $1", user.id);
-                const guid = uuid.v4();
+                const guid = uuid_1.default.v4();
                 yield t.none("INSERT INTO user_verifications(guid, user_id) VALUES($1, $2)", [guid, user.id]);
                 userVerificationQueue.add({ email, guid });
             }));

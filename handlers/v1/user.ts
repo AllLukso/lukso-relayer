@@ -1,15 +1,18 @@
-const bcrypt = require("bcrypt");
-const uuid = require("uuid");
+import bcrypt from "bcrypt";
+import uuid from "uuid";
 const saltRounds = 10;
-const Queue = require("bull");
-require("dotenv").config();
+import Queue from "bull";
+import { Request, Response, NextFunction } from "express";
+import PG from "pg-promise";
+import dotenv from "dotenv";
+dotenv.config();
 
 const userVerificationQueue = new Queue(
   "user-verification",
-  process.env.REDIS_URL
+  process.env.REDIS_URL!
 );
 
-async function create(req, res, next) {
+async function create(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const { email, password, confirmPassword } = req.body;
@@ -19,7 +22,7 @@ async function create(req, res, next) {
 
     bcrypt.hash(password, saltRounds, async function (err, hash) {
       try {
-        db.task(async (t) => {
+        db.task(async (t: PG.ITask<{}>) => {
           const user = await t.one(
             "INSERT INTO users(email, password, verified) VALUES(${email}, ${password}, ${verified}) RETURNING *",
             {
@@ -45,15 +48,15 @@ async function create(req, res, next) {
 
           return guid;
         })
-          .then((guid) => {
+          .then((guid: string) => {
             userVerificationQueue.add({ email, guid });
             res.send("user created");
           })
-          .catch((err) => {
+          .catch((err: string) => {
             console.log(err);
             return next(err);
           });
-      } catch (err) {
+      } catch (err: any) {
         return next(err.message);
       }
     });
@@ -62,12 +65,12 @@ async function create(req, res, next) {
   }
 }
 
-async function verify(req, res, next) {
+async function verify(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const { guid } = req.params;
 
-    db.task(async (t) => {
+    db.task(async (t: PG.ITask<{}>) => {
       const userVerification = await t.one(
         "SELECT user_id FROM user_verifications WHERE guid = $1",
         guid
@@ -86,13 +89,13 @@ async function verify(req, res, next) {
       ]);
       return authToken;
     })
-      .then((authToken) => {
+      .then((authToken: string) => {
         // TODO: Need to redirect the the users dashboard and save the auth token in storage.
         res.redirect(
           `${process.env.FRONTEND_HOST}/dashboard?authToken=${authToken}`
         );
       })
-      .catch((err) => {
+      .catch((err: any) => {
         console.log(err);
         return next("failed to verify user");
       });
@@ -102,12 +105,12 @@ async function verify(req, res, next) {
   }
 }
 
-async function login(req, res, next) {
+async function login(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const { email, password } = req.body;
 
-    db.task(async (t) => {
+    db.task(async (t: PG.ITask<{}>) => {
       const user = await t.one("SELECT * FROM users WHERE email = $1", email);
 
       if (!user.verified) return next("user not verified");
@@ -131,7 +134,7 @@ async function login(req, res, next) {
   }
 }
 
-async function get(req, res, next) {
+async function get(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const { email } = req.params;
@@ -145,12 +148,16 @@ async function get(req, res, next) {
   }
 }
 
-async function resendVerification(req, res, next) {
+async function resendVerification(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const db = req.app.get("db");
     const { email } = req.body;
 
-    await db.task(async (t) => {
+    await db.task(async (t: PG.ITask<{}>) => {
       const user = await t.oneOrNone(
         "SELECT * FROM users WHERE email = $1",
         email

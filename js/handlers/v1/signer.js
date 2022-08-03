@@ -23,11 +23,10 @@ function create(req, res, next) {
             const signer = ethers_1.default.utils.verifyMessage(ethers_1.default.utils.arrayify(message), signature);
             if (address !== signer)
                 throw "not address owner";
-            let user = req.user;
             yield db.task((t) => __awaiter(this, void 0, void 0, function* () {
                 yield t.none("INSERT INTO signers(address, user_id) VALUES($1, $2)", [
                     address,
-                    user.id,
+                    req.user.id,
                 ]);
             }));
             res.send("added signer");

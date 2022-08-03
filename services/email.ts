@@ -1,7 +1,7 @@
 const nodemailer = require("nodemailer");
 require("dotenv").config();
 
-async function sendUserVerification(email, guid) {
+async function sendUserVerification(email: string, guid: string) {
   let transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
