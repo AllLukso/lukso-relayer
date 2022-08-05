@@ -44,7 +44,7 @@ expressApp.use(express.json());
 expressApp.use(cors());
 
 // Transaction endpoints.
-expressApp.post("/v1/execute", transaction.execute_v2);
+expressApp.post("/v1/execute", transaction.execute_v3);
 expressApp.post("/v1/quota", transaction.quota);
 
 // User endpoints.

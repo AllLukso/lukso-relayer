@@ -3,7 +3,7 @@ import KeyManagerContract from "@lukso/lsp-smart-contracts/artifacts/LSP6KeyMana
 import UniversalProfileContract from "@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json";
 import PG from "pg-promise";
 import { Request, Response, NextFunction } from "express";
-import ethers from "ethers";
+import { ethers } from "ethers";
 import Queue from "bull";
 const CHAIN_ID = process.env.CHAIN_ID;
 const RPC_URL = process.env.RPC_URL;
@@ -185,10 +185,10 @@ async function quota(req: Request, res: Response, next: NextFunction) {
 
 async function execute_v2(req: Request, res: Response, next: NextFunction) {
   try {
-    const {
-      address,
-      transaction: { nonce, abi, signature },
-    } = req.body;
+    const address: string = req.body.address;
+    const nonce: string = req.body.nonce;
+    const abi: string = req.body.abi;
+    const signature: string = req.body.signature;
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
@@ -258,9 +258,73 @@ async function execute_v2(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+async function execute_v3(req: Request, res: Response, next: NextFunction) {
+  try {
+    const {
+      address,
+      transaction: { nonce, abi, signature },
+    } = req.body;
+    validateExecuteParams(address, nonce, abi, signature);
+
+    const db = req.app.get("db");
+    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+    const wallet = new ethers.Wallet(PRIVATE_KEY!, provider);
+
+    const universalProfileContract = new ethers.Contract(
+      address,
+      UniversalProfileContract.abi,
+      wallet
+    );
+    const keyManagerAddress = await universalProfileContract.owner();
+    const keyManager = new ethers.Contract(
+      keyManagerAddress,
+      KeyManagerContract.abi,
+      wallet
+    );
+
+    const estimatedGasBN = await keyManager.estimateGas.executeRelayCall(
+      signature,
+      nonce,
+      abi
+    );
+    const estimatedGas = estimatedGasBN.toNumber();
+    const quota = await ensureRemainingQuotaV3(db, estimatedGas, address);
+    const channel_id = extractChannelId(nonce);
+
+    const message = ethers.utils.solidityKeccak256(
+      ["uint", "address", "uint", "bytes"],
+      [CHAIN_ID, keyManagerAddress, nonce, abi]
+    );
+
+    const signerAddress = ethers.utils.verifyMessage(
+      ethers.utils.arrayify(message),
+      signature
+    );
+    await db.none(
+      "INSERT INTO transactions_v3(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address) VALUES($1, $2, $3, $4, $5, $6, $7)",
+      [address, nonce, signature, abi, channel_id, "PENDING", signerAddress]
+    );
+
+    // Calculate hash and return to caller.
+
+    // Wait 5 seconds to let other transactions come in.
+
+    // Check if there is a pending transaction on the same channel with a smaller nonce?
+    res.json({ transactionHash: "0xabc" });
+  } catch (err) {
+    console.log(err);
+    next("Failed to execute_v3");
+  }
+}
+
+function extractChannelId(nonce: string): number {
+  const bn = ethers.BigNumber.from(nonce);
+  return bn.shr(128).toNumber();
+}
+
 function validateExecuteParams(
   address: string,
-  nonce: number,
+  nonce: string,
   abi: string,
   signature: string
 ) {
@@ -271,12 +335,56 @@ function validateExecuteParams(
     throw "signature must be present";
 }
 
+type Quota = {
+  monthly_gas: Number;
+  gas_used: Number;
+  estimated_gas_used: Number;
+  universal_profile_address: String;
+};
+
+async function ensureRemainingQuotaV3(
+  db: PG.IDatabase<{}>,
+  estimatedGas: number,
+  address: string
+): Promise<Quota> {
+  return await db.task(async (t: PG.ITask<{}>) => {
+    let quota = await t.oneOrNone(
+      "SELECT * FROM quotas_v3 WHERE universal_profile_address = $1",
+      address
+    );
+    if (quota && quota.gas_used + estimatedGas <= quota.monthly_gas)
+      return quota;
+
+    // Making it here means they are out of gas on the main UP
+    const approvedUniversalProfiles = await t.any(
+      "SELECT * FROM approved_universal_profiles_v3 WHERE approved_address = $1",
+      address
+    );
+    if (approvedUniversalProfiles.length === 0) throw "gas limit reached";
+
+    // Get the quota of the UP that approved this UP
+    for (let i = 0; i < approvedUniversalProfiles.length; i++) {
+      quota = await t.oneOrNone(
+        "SELECT * FROM quotas_v3 WHERE universal_profile_address = $1",
+        approvedUniversalProfiles[i].approver_address
+      );
+      // Found a quota with enough gas to run the transaction
+      if (quota.gas_used + estimatedGas <= quota.monthly_gas) break;
+    }
+
+    if (!quota) throw "gas limit reached";
+    if (quota.gas_used + estimatedGas > quota.monthly_gas)
+      throw "gas limit reached";
+    return quota;
+  });
+}
+
 async function ensureRemainingQuota(
   t: PG.ITask<{}>,
   estimatedGas: number,
   address: string,
   keyManagerAddress: string,
-  nonce: number,
+  nonce: string,
   abi: string,
   signature: string
 ) {
@@ -325,4 +433,4 @@ async function ensureRemainingQuota(
   );
 }
 
-module.exports = { execute, quota, execute_v2 };
+module.exports = { execute, quota, execute_v2, execute_v3 };
