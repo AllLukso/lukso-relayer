@@ -18,10 +18,6 @@ transactionQueue.process(async (job: Queue.Job) => {
   const wallet = new ethers.Wallet(controllingAccountPrivateKey!, provider);
   const { keyManagerAddress, transactionId } = job.data;
 
-  console.log("RUNNING JOB");
-  console.log("keyManagerAddress: ", keyManagerAddress);
-  console.log("transactionId: ", transactionId);
-
   const keyManager = new ethers.Contract(
     keyManagerAddress,
     KeyManagerContract.abi,
@@ -51,8 +47,6 @@ transactionQueue.process(async (job: Queue.Job) => {
 
   // If we made it here then this transaction is ready to be submitted, submit it.
 
-  console.log("about to executeRelayCall");
-  console.time("executeRelayCall");
   const executeRelayCallTransaction = await keyManager.executeRelayCall(
     transaction.signature,
     transaction.nonce,
@@ -61,15 +55,21 @@ transactionQueue.process(async (job: Queue.Job) => {
       nonce: transaction.relayer_nonce,
     }
   );
-  console.timeEnd("executeRelayCall");
-  console.log("finished executeRelayCall");
-
-  console.log(executeRelayCallTransaction);
-
   const receipt = await executeRelayCallTransaction.wait();
 
-  console.log("receipt: ", receipt);
+  await db.task(async (t) => {
+    await t.none(
+      "UPDATE transactions SET status = 'COMPLETED', gas_used = $1 WHERE id = $2",
+      [receipt.gasUsed.toNumber(), transaction.id]
+    );
 
-  // TODO: Use the gasLimit returned here to immediately decrement the "pending gas limit", if sending another transaction takes their pending limit down too low reject the transaction.
-  // Wait until their "pending gas limit" equals their actual "gas remaining" we can sync these values when the transaction confirms. We need to start a job to monitor this transaction and wait until it confirms?
+    await t.none(
+      "UPDATE quotas SET gas_used = gas_used - $1 + $2 WHERE universal_profile_address = $3",
+      [
+        transaction.estimated_gas,
+        receipt.gasUsed.toNumber(),
+        transaction.universal_profile_address,
+      ]
+    );
+  });
 });

@@ -10,6 +10,8 @@ CREATE TABLE transactions(
   hash VARCHAR(1000),
   relayer_nonce VARCHAR(100),
   relayer_address VARCHAR(100),
+  estimated_gas INT,
+  gas_used INT,
   FOREIGN KEY(universal_profile_address) REFERENCES universal_profiles(address),
   UNIQUE (nonce, channel_id, signer_address)
 );

@@ -2,9 +2,12 @@ import dotenv from "dotenv";
 import Queue from "bull";
 import KeyManagerContract from "@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json";
 import UniversalProfileContract from "@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json";
+import { ERC725 } from "@erc725/erc725.js";
+import LSP6Schema from "@erc725/erc725.js/schemas/LSP6KeyManager.json";
 import PG from "pg-promise";
 import { Request, Response, NextFunction } from "express";
 import { ethers } from "ethers";
+import Web3 from "web3";
 import Quota from "../../types/quota";
 
 const CHAIN_ID = process.env.CHAIN_ID;
@@ -13,6 +16,10 @@ const PRIVATE_KEY = process.env.PK;
 const transactionQueue = new Queue("transaction-execution", {
   redis: { port: 6379, host: process.env.REDIS_HOST },
 });
+const web3 = new Web3(RPC_URL!);
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+const wallet = new ethers.Wallet(PRIVATE_KEY!, provider);
+
 dotenv.config();
 
 export async function execute(req: Request, res: Response, next: NextFunction) {
@@ -24,8 +31,6 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
-    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const wallet = new ethers.Wallet(PRIVATE_KEY!, provider);
 
     const universalProfileContract = new ethers.Contract(
       address,
@@ -39,6 +44,18 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
       wallet
     );
 
+    const message = ethers.utils.solidityKeccak256(
+      ["uint", "address", "uint", "bytes"],
+      [CHAIN_ID, keyManagerAddress, nonce, abi]
+    );
+
+    // Need to arrayify here to get correct address.
+    const signerAddress = ethers.utils.verifyMessage(
+      ethers.utils.arrayify(message),
+      signature
+    );
+    await checkSignerPermissions(address, signerAddress);
+
     const estimatedGasBN = await keyManager.estimateGas.executeRelayCall(
       signature,
       nonce,
@@ -48,22 +65,11 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     const quota = await ensureRemainingQuota(db, estimatedGas, address);
     const channelId = extractChannelId(nonce);
 
-    const message = ethers.utils.solidityKeccak256(
-      ["uint", "address", "uint", "bytes"],
-      [CHAIN_ID, keyManagerAddress, nonce, abi]
-    );
-
-    // TODO: Double check that we need to arrayify here.
-    const signerAddress = ethers.utils.verifyMessage(
-      ethers.utils.arrayify(message),
-      signature
-    );
-
+    // This is to ensure that we get the correct nonce for this wallet.
     const pendingWalletTransaction = await db.oneOrNone(
       "SELECT * FROM transactions WHERE relayer_address = $1 AND status = 'PENDING' ORDER BY relayer_nonce DESC LIMIT 1",
       [wallet.address]
     );
-
     let walletNonce: number;
     if (pendingWalletTransaction) {
       walletNonce = Number(pendingWalletTransaction.relayer_nonce) + 1;
@@ -74,7 +80,7 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     let transaction;
     await db.tx(async (t: PG.ITask<{}>) => {
       transaction = await t.one(
-        "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
+        "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
         [
           address,
           nonce,
@@ -85,6 +91,8 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
           signerAddress,
           walletNonce,
           wallet.address,
+          estimatedGas,
+          0,
         ]
       );
 
@@ -119,6 +127,18 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     console.log(err);
     next("Failed to execute");
   }
+}
+
+async function checkSignerPermissions(address: string, signerAddress: string) {
+  // @ts-ignore
+  const erc725 = new ERC725(LSP6Schema, address, web3.currentProvider);
+  const addressPermission = await erc725.getData({
+    keyName: "AddressPermissions:Permissions:<address>",
+    dynamicKeyParts: signerAddress,
+  });
+  // @ts-ignore
+  const decodedPermission = erc725.decodePermissions(addressPermission.value);
+  if (!decodedPermission["SIGN"]) throw "signer missing sign permissions";
 }
 
 export async function quota(req: Request, res: Response, next: NextFunction) {
@@ -202,6 +222,17 @@ async function ensureRemainingQuota(
 
     if (!quota) {
       // Initialize a new quota for this UP.
+      const up = await t.oneOrNone(
+        "SELECT * FROM universal_profiles WHERE address = $1",
+        address
+      );
+      if (!up) {
+        await t.none(
+          "INSERT INTO universal_profiles(address, created_at) VALUES($1, $2)",
+          [address, new Date()]
+        );
+      }
+
       quota = await t.one(
         "INSERT INTO quotas(universal_profile_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
         [address, 650000, 0]
