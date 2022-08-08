@@ -1,4 +1,4 @@
-CREATE TABLE transactions_v3(
+CREATE TABLE transactions(
   id SERIAL PRIMARY KEY,
   universal_profile_address VARCHAR(100),
   nonce VARCHAR(100),
@@ -8,6 +8,8 @@ CREATE TABLE transactions_v3(
   status VARCHAR(100),
   signer_address VARCHAR(100),
   hash VARCHAR(1000),
-  FOREIGN KEY(universal_profile_address) REFERENCES universal_profiles_v3(address),
+  relayer_nonce VARCHAR(100),
+  relayer_address VARCHAR(100),
+  FOREIGN KEY(universal_profile_address) REFERENCES universal_profiles(address),
   UNIQUE (nonce, channel_id, signer_address)
 );

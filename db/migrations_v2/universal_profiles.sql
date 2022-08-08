@@ -1,1 +1,0 @@
-CREATE TABLE universal_profiles_v3(address VARCHAR(100), created_at TIMESTAMP, updated_at TIMESTAMP, PRIMARY KEY (address));
