@@ -12,4 +12,4 @@ Run `npm i` to install all dependencies.
 
 Replace `example.env` with `.env` and fill in with values
 
-Run `node server.js` to start the server and make some requests!
+Run `tsc` to compile then `npm start` to start the server.
