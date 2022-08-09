@@ -1,5 +1,4 @@
 import dotenv from "dotenv";
-import Queue from "bull";
 import KeyManagerContract from "@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json";
 import UniversalProfileContract from "@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json";
 import { ERC725 } from "@erc725/erc725.js";
@@ -9,18 +8,15 @@ import { Request, Response, NextFunction } from "express";
 import { ethers } from "ethers";
 import Web3 from "web3";
 import Quota from "../../types/quota";
+import txQueue from "../../jobs/transaction/queue";
+dotenv.config();
 
 const CHAIN_ID = process.env.CHAIN_ID;
 const RPC_URL = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PK;
-const transactionQueue = new Queue("transaction-execution", {
-  redis: { port: 6379, host: process.env.REDIS_HOST },
-});
 const web3 = new Web3(RPC_URL!);
 const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const wallet = new ethers.Wallet(PRIVATE_KEY!, provider);
-
-dotenv.config();
 
 export async function execute(req: Request, res: Response, next: NextFunction) {
   try {
@@ -109,7 +105,6 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
       nonce,
       abi
     );
-
     const populatedUnsignedTx = await wallet.populateTransaction(unsignedTx);
     populatedUnsignedTx.nonce = walletNonce;
     const signedTx = await keyManager.signer.signTransaction(
@@ -117,7 +112,7 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     );
     const parsedTx = ethers.utils.parseTransaction(signedTx);
 
-    transactionQueue.add({
+    txQueue.add({
       keyManagerAddress,
       transactionId: transaction["id"],
     });
@@ -162,21 +157,52 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
       signature
     );
 
-    const transactionQuota = await db.task(async (t: PG.ITask<{}>) => {
-      let transactionQuota;
-      transactionQuota = await t.oneOrNone(
-        "SELECT * FROM quotas WHERE universal_profile_address = $1",
-        address
-      );
-
-      if (!transactionQuota) {
-        transactionQuota = await t.one(
-          "INSERT INTO quotas(universal_profile_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
-          [address, 650000, 0]
+    const { transactionQuota, approvedQuotas } = await db.task(
+      async (t: PG.ITask<{}>) => {
+        let transactionQuota;
+        transactionQuota = await t.oneOrNone(
+          "SELECT * FROM quotas WHERE universal_profile_address = $1",
+          address
         );
+
+        if (!transactionQuota) {
+          transactionQuota = await t.one(
+            "INSERT INTO quotas(universal_profile_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
+            [address, 650000, 0]
+          );
+        }
+
+        const approvedUPs = await t.any(
+          "SELECT * FROM approved_universal_profiles WHERE approved_address = $1",
+          address
+        );
+        let approvedQuotas;
+        if (approvedUPs && approvedUPs.length > 0) {
+          const approverAddresses = approvedUPs.map(
+            (aup) => aup.approver_address
+          );
+          approvedQuotas = await t.any(
+            "SELECT * FROM quotas WHERE universal_profile_address IN ($1:csv)",
+            [approverAddresses]
+          );
+        }
+        return { transactionQuota, approvedQuotas };
       }
-      return transactionQuota;
-    });
+    );
+
+    // TODO: Need to add a quota amount to the approved_universal_profiles table, that keep strack of how much of each quota this contract can use.
+    let totalQuota = transactionQuota.monthly_gas;
+    let gasUsed = transactionQuota.gas_used;
+    if (approvedQuotas && approvedQuotas.length > 0) {
+      totalQuota = approvedQuotas.reduce(
+        (acc: number, aq: any) => aq.monthly_gas + acc,
+        totalQuota
+      );
+      gasUsed = approvedQuotas.reduce(
+        (acc: number, aq: any) => aq.gas_used + acc,
+        gasUsed
+      );
+    }
 
     const date = new Date();
     const firstOfNextMonth = new Date(
@@ -186,9 +212,9 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
     );
 
     res.json({
-      quota: transactionQuota.gas_used,
+      quota: gasUsed,
       unit: "gas",
-      totalQuota: transactionQuota.monthly_gas,
+      totalQuota: totalQuota,
       resetDate: firstOfNextMonth.getTime(),
     });
   } catch (err) {
