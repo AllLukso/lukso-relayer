@@ -11,6 +11,7 @@ const controllingAccountPrivateKey = process.env.PK;
 const rpcURL = process.env.RPC_URL;
 const provider = new ethers.providers.JsonRpcProvider(rpcURL);
 // TODO: Need to make sure we use the same wallet here that was used in trasaction.execute
+// When we start using multiple wallets, we can look up the private key using the relayer_address that was set when the transaction was created.
 const wallet = new ethers.Wallet(controllingAccountPrivateKey!, provider);
 
 transactionQueue.process(async (job: Queue.Job) => {
@@ -36,6 +37,7 @@ transactionQueue.process(async (job: Queue.Job) => {
   });
 
   if (pendingTransactions && pendingTransactions.length > 0) {
+    // TODO: Need to set a maximum number of retries here so we don't retry infinitely.
     transactionQueue.add(
       { keyManagerAddress, transactionId },
       { delay: 60000 } // Wait one minute and try again to see if other jobs have cleared yet...

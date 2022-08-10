@@ -27,101 +27,156 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
-
-    const universalProfileContract = new ethers.Contract(
-      address,
-      UniversalProfileContract.abi,
-      wallet
-    );
-    const keyManagerAddress = await universalProfileContract.owner();
-    const keyManager = new ethers.Contract(
-      keyManagerAddress,
-      KeyManagerContract.abi,
-      wallet
-    );
-
-    const message = ethers.utils.solidityKeccak256(
-      ["uint", "address", "uint", "bytes"],
-      [CHAIN_ID, keyManagerAddress, nonce, abi]
-    );
-
-    // Need to arrayify here to get correct address.
-    const signerAddress = ethers.utils.verifyMessage(
-      ethers.utils.arrayify(message),
-      signature
-    );
+    const { kmAddress, keyManager } = await setUpKeyManager(address);
+    const signerAddress = getSignerAddress(kmAddress, nonce, abi, signature);
     await checkSignerPermissions(address, signerAddress);
-
-    const estimatedGasBN = await keyManager.estimateGas.executeRelayCall(
-      signature,
-      nonce,
-      abi
-    );
-    const estimatedGas = estimatedGasBN.toNumber();
+    const estimatedGas = await estimateGas(keyManager, signature, nonce, abi);
     const quota = await ensureRemainingQuota(db, estimatedGas, address);
     const channelId = extractChannelId(nonce);
-
-    // This is to ensure that we get the correct nonce for this wallet.
-    const pendingWalletTransaction = await db.oneOrNone(
-      "SELECT * FROM transactions WHERE relayer_address = $1 AND status = 'PENDING' ORDER BY relayer_nonce DESC LIMIT 1",
-      [wallet.address]
-    );
-    let walletNonce: number;
-    if (pendingWalletTransaction) {
-      walletNonce = Number(pendingWalletTransaction.relayer_nonce) + 1;
-    } else {
-      walletNonce = await wallet.getTransactionCount();
-    }
-
-    let transaction;
-    await db.tx(async (t: PG.ITask<{}>) => {
-      transaction = await t.one(
-        "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
-        [
-          address,
-          nonce,
-          signature,
-          abi,
-          channelId,
-          "PENDING",
-          signerAddress,
-          walletNonce,
-          wallet.address,
-          estimatedGas,
-          0,
-        ]
-      );
-
-      await t.none("UPDATE quotas SET gas_used = gas_used + $1 WHERE id = $2", [
-        estimatedGas,
-        quota.id,
-      ]);
-    });
-    if (!transaction) throw "no transaction";
-
-    // Calculate and return hash
-    const unsignedTx = await keyManager.populateTransaction.executeRelayCall(
-      signature,
+    const walletNonce = await getWalletNonce(db);
+    const transaction = await createTransaction(
+      db,
+      estimatedGas,
+      quota,
+      address,
       nonce,
-      abi
+      signature,
+      abi,
+      channelId,
+      signerAddress,
+      walletNonce
     );
-    const populatedUnsignedTx = await wallet.populateTransaction(unsignedTx);
-    populatedUnsignedTx.nonce = walletNonce;
-    const signedTx = await keyManager.signer.signTransaction(
-      populatedUnsignedTx
-    );
-    const parsedTx = ethers.utils.parseTransaction(signedTx);
+    const hash = await calcHash(keyManager, signature, nonce, abi, walletNonce);
 
     txQueue.add({
-      keyManagerAddress,
+      kmAddress,
       transactionId: transaction["id"],
     });
-
-    res.json({ transactionHash: parsedTx.hash });
+    res.json({ transactionHash: hash });
   } catch (err) {
     console.log(err);
     next("Failed to execute");
   }
+}
+
+async function calcHash(
+  keyManager: ethers.Contract,
+  signature: string,
+  nonce: string,
+  abi: string,
+  walletNonce: number
+) {
+  const unsignedTx = await keyManager.populateTransaction.executeRelayCall(
+    signature,
+    nonce,
+    abi
+  );
+  const populatedUnsignedTx = await wallet.populateTransaction(unsignedTx);
+  populatedUnsignedTx.nonce = walletNonce;
+  const signedTx = await keyManager.signer.signTransaction(populatedUnsignedTx);
+  const parsedTx = ethers.utils.parseTransaction(signedTx);
+  return parsedTx.hash;
+}
+
+async function createTransaction(
+  db: any,
+  estimatedGas: number,
+  quota: Quota,
+  address: string,
+  nonce: string,
+  signature: string,
+  abi: string,
+  channelId: number,
+  signerAddress: string,
+  walletNonce: number
+) {
+  const transaction = await db.tx(async (t: PG.ITask<{}>) => {
+    await t.none("UPDATE quotas SET gas_used = gas_used + $1 WHERE id = $2", [
+      estimatedGas,
+      quota.id,
+    ]);
+    return await t.one(
+      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
+      [
+        address,
+        nonce,
+        signature,
+        abi,
+        channelId,
+        "PENDING",
+        signerAddress,
+        walletNonce,
+        wallet.address,
+        estimatedGas,
+        0,
+      ]
+    );
+  });
+  if (!transaction) throw "no transaction";
+  return transaction;
+}
+
+async function getWalletNonce(db: any) {
+  const pendingWalletTransaction = await db.oneOrNone(
+    "SELECT * FROM transactions WHERE relayer_address = $1 AND status = 'PENDING' ORDER BY relayer_nonce DESC LIMIT 1",
+    [wallet.address]
+  );
+  let walletNonce: number;
+  if (pendingWalletTransaction) {
+    walletNonce = Number(pendingWalletTransaction.relayer_nonce) + 1;
+  } else {
+    walletNonce = await wallet.getTransactionCount();
+  }
+  return walletNonce;
+}
+
+async function estimateGas(
+  keyManager: ethers.Contract,
+  signature: string,
+  nonce: string,
+  abi: string
+) {
+  const estimatedGasBN = await keyManager.estimateGas.executeRelayCall(
+    signature,
+    nonce,
+    abi
+  );
+  const estimatedGas = estimatedGasBN.toNumber();
+  return estimatedGas;
+}
+
+function getSignerAddress(
+  kmAddress: any,
+  nonce: string,
+  abi: string,
+  signature: string
+) {
+  const message = ethers.utils.solidityKeccak256(
+    ["uint", "address", "uint", "bytes"],
+    [CHAIN_ID, kmAddress, nonce, abi]
+  );
+
+  // Need to arrayify here to get correct address.
+  const signerAddress = ethers.utils.verifyMessage(
+    ethers.utils.arrayify(message),
+    signature
+  );
+  return signerAddress;
+}
+
+async function setUpKeyManager(address: string) {
+  const universalProfileContract = new ethers.Contract(
+    address,
+    UniversalProfileContract.abi,
+    wallet
+  );
+  const kmAddress = await universalProfileContract.owner();
+  const keyManager = new ethers.Contract(
+    kmAddress,
+    KeyManagerContract.abi,
+    wallet
+  );
+  return { kmAddress, keyManager };
 }
 
 async function checkSignerPermissions(address: string, signerAddress: string) {
