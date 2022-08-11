@@ -34,6 +34,8 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     const quota = await ensureRemainingQuota(db, estimatedGas, address);
     const channelId = extractChannelId(nonce);
     const walletNonce = await getWalletNonce(db);
+    const hash = await calcHash(keyManager, signature, nonce, abi, walletNonce);
+
     const transaction = await createTransaction(
       db,
       estimatedGas,
@@ -44,9 +46,9 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
       abi,
       channelId,
       signerAddress,
-      walletNonce
+      walletNonce,
+      hash!
     );
-    const hash = await calcHash(keyManager, signature, nonce, abi, walletNonce);
 
     txQueue.add({
       kmAddress,
@@ -88,7 +90,8 @@ async function createTransaction(
   abi: string,
   channelId: number,
   signerAddress: string,
-  walletNonce: number
+  walletNonce: number,
+  hash: string
 ) {
   const transaction = await db.tx(async (t: PG.ITask<{}>) => {
     await t.none("UPDATE quotas SET gas_used = gas_used + $1 WHERE id = $2", [
@@ -96,7 +99,7 @@ async function createTransaction(
       quota.id,
     ]);
     return await t.one(
-      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
+      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used, hash) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
       [
         address,
         nonce,
@@ -109,6 +112,7 @@ async function createTransaction(
         wallet.address,
         estimatedGas,
         0,
+        hash,
       ]
     );
   });

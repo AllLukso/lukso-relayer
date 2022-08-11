@@ -15,6 +15,9 @@ expressApp.set("db", db);
 // Jobs.
 import "./jobs/transaction/execute";
 
+// Cron.
+import "./cron/pending_transactions";
+
 declare global {
   namespace Express {
     interface User {

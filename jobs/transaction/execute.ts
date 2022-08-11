@@ -15,59 +15,49 @@ const provider = new ethers.providers.JsonRpcProvider(rpcURL);
 const wallet = new ethers.Wallet(controllingAccountPrivateKey!, provider);
 
 transactionQueue.process(async (job: Queue.Job) => {
-  const { keyManagerAddress, transactionId } = job.data;
-  const keyManager = new ethers.Contract(
-    keyManagerAddress,
-    KeyManagerContract.abi,
-    wallet
-  );
-
-  let transaction: any;
-  let pendingTransactions: any;
-  await db.task(async (t) => {
-    transaction = await t.one(
-      "SELECT * FROM transactions WHERE id = $1",
-      transactionId
+  try {
+    const { kmAddress, transactionId } = job.data;
+    const keyManager = new ethers.Contract(
+      kmAddress,
+      KeyManagerContract.abi,
+      wallet
     );
 
-    pendingTransactions = await t.any(
-      "SELECT * FROM transactions WHERE signer_address = $1 and channel_id = $2 and status = 'PENDING' and nonce < $3",
-      [transaction.signer_address, transaction.channel_id, transaction.nonce]
-    );
-  });
+    let transaction: any;
+    let pendingTransactions: any;
+    await db.task(async (t) => {
+      transaction = await t.one(
+        "SELECT * FROM transactions WHERE id = $1",
+        transactionId
+      );
 
-  if (pendingTransactions && pendingTransactions.length > 0) {
-    // TODO: Need to set a maximum number of retries here so we don't retry infinitely.
-    transactionQueue.add(
-      { keyManagerAddress, transactionId },
-      { delay: 60000 } // Wait one minute and try again to see if other jobs have cleared yet...
-    );
-    return;
-  }
+      pendingTransactions = await t.any(
+        "SELECT * FROM transactions WHERE signer_address = $1 and channel_id = $2 and status = 'PENDING' and nonce < $3",
+        [transaction.signer_address, transaction.channel_id, transaction.nonce]
+      );
+    });
 
-  const executeRelayCallTransaction = await keyManager.executeRelayCall(
-    transaction.signature,
-    transaction.nonce,
-    transaction.abi,
-    {
-      nonce: transaction.relayer_nonce,
+    if (pendingTransactions && pendingTransactions.length > 0) {
+      // TODO: Need to set a maximum number of retries here so we don't retry infinitely.
+
+      // TODO: In the above case need to change nonces for all other transactions so the don't get stuck, this changes all the hashes too.. Bad last resort type scenario.
+      transactionQueue.add(
+        { kmAddress, transactionId },
+        { delay: 60000 } // Wait one minute and try again to see if other jobs have cleared yet...
+      );
+      return;
     }
-  );
-  const receipt = await executeRelayCallTransaction.wait();
 
-  await db.task(async (t) => {
-    await t.none(
-      "UPDATE transactions SET status = 'COMPLETED', gas_used = $1 WHERE id = $2",
-      [receipt.gasUsed.toNumber(), transaction.id]
+    // TODO: Force this to fail and see what happens. How can we recover from this?
+    const executeRelayCallTransaction = await keyManager.executeRelayCall(
+      transaction.signature,
+      transaction.nonce,
+      transaction.abi,
+      {
+        nonce: transaction.relayer_nonce,
+      }
     );
-
-    await t.none(
-      "UPDATE quotas SET gas_used = gas_used - $1 + $2 WHERE universal_profile_address = $3",
-      [
-        transaction.estimated_gas,
-        receipt.gasUsed.toNumber(),
-        transaction.universal_profile_address,
-      ]
-    );
-  });
+  } catch (err) {
+    console.log(err);
+  }
 });
