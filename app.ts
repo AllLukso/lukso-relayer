@@ -5,6 +5,7 @@ import cors from "cors";
 
 // Handlers.
 import { execute, quota } from "./handlers/v1/transaction";
+import { get as getApprovals } from "./handlers/v1/approvals";
 
 const expressApp: Express = express();
 
@@ -34,6 +35,8 @@ expressApp.use(cors());
 // Transaction endpoints.
 expressApp.post("/v1/execute", execute);
 expressApp.post("/v1/quota", quota);
+// Approval endpoints.
+expressApp.get("/v1/approvals/:address", getApprovals);
 
 // Error handler middleware should be last.
 expressApp.use((err: string, req: Request, res: Response, next: any) => {

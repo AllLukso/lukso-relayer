@@ -210,11 +210,11 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
       [address, timestamp]
     );
 
-    // TODO: Should I add an owner address to the univeral profiles table?
     const signerAddress = ethers.utils.verifyMessage(
       ethers.utils.arrayify(message),
       signature
     );
+    await checkSignerPermissions(address, signerAddress);
 
     const { transactionQuota, approvedQuotas } = await db.task(
       async (t: PG.ITask<{}>) => {
