@@ -12,6 +12,7 @@ const rpcURL = process.env.RPC_URL;
 const provider = new ethers.providers.JsonRpcProvider(rpcURL);
 // TODO: Need to make sure we use the same wallet here that was used in trasaction.execute
 // When we start using multiple wallets, we can look up the private key using the relayer_address that was set when the transaction was created.
+// Each instance of the relayer will have a private key injected into it, we will need to know which relayer handled the initial request so we can have that same relayer job pick it up.
 const wallet = new ethers.Wallet(controllingAccountPrivateKey!, provider);
 
 transactionQueue.process(async (job: Queue.Job) => {
@@ -40,7 +41,7 @@ transactionQueue.process(async (job: Queue.Job) => {
     if (pendingTransactions && pendingTransactions.length > 0) {
       // TODO: Need to set a maximum number of retries here so we don't retry infinitely.
 
-      // TODO: In the above case need to change nonces for all other transactions so the don't get stuck, this changes all the hashes too.. Bad last resort type scenario.
+      // TODO: In the above case need to change nonces for all other transactions so they don't get stuck, this changes all the hashes too.. Bad last resort type scenario.
       transactionQueue.add(
         { kmAddress, transactionId },
         { delay: 60000 } // Wait one minute and try again to see if other jobs have cleared yet...

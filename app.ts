@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 import express, { Express, Request, Response } from "express";
 import cors from "cors";
+import "./services/stripe"
 
 // Handlers.
 import { execute, quota } from "./handlers/v1/transaction";
