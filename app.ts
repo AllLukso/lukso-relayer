@@ -2,11 +2,12 @@ import dotenv from "dotenv";
 dotenv.config();
 import express, { Express, Request, Response } from "express";
 import cors from "cors";
-import "./services/stripe"
+import "./services/stripe";
 
 // Handlers.
 import { execute, quota } from "./handlers/v1/transaction";
 import { get as getApprovals } from "./handlers/v1/approvals";
+import { createSession, webhooks } from "./handlers/v1/stripe";
 
 const expressApp: Express = express();
 
@@ -38,6 +39,10 @@ expressApp.post("/v1/execute", execute);
 expressApp.post("/v1/quota", quota);
 // Approval endpoints.
 expressApp.get("/v1/approvals/:address", getApprovals);
+// Stripe endpoints.
+expressApp.post("/v1/stripe/session", createSession);
+// Stripe webhooks.
+expressApp.post("/webhook", webhooks);
 
 // Error handler middleware should be last.
 expressApp.use((err: string, req: Request, res: Response, next: any) => {
