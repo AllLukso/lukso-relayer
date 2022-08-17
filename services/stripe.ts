@@ -42,7 +42,10 @@ export async function createCustomer(db: PG.IDatabase<{}>, upAddress: string) {
   return user.id;
 }
 
-export async function createStripeSession(priceId: string) {
+export async function createStripeSession(
+  priceId: string,
+  clientReferenceId: string
+) {
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     line_items: [
@@ -57,13 +60,14 @@ export async function createStripeSession(priceId: string) {
     // is redirected to the success page.
     success_url: `http://${process.env.FRONTEND_HOST}/stripe_success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `http://${process.env.FRONTEND_HOST}/`,
+    client_reference_id: clientReferenceId,
   });
   return session;
 }
 
 export async function constructEvent(
-  body: string,
-  signature: string,
+  body: any,
+  signature: any,
   secret: string
 ) {
   return stripe.webhooks.constructEvent(body, signature, secret);

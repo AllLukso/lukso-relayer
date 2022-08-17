@@ -30,19 +30,22 @@ declare global {
 }
 
 // Middleware.
-expressApp.use(express.json());
 // TODO: Restrict this to only the front end expressApp.
 expressApp.use(cors());
 
 // Transaction endpoints.
-expressApp.post("/v1/execute", execute);
-expressApp.post("/v1/quota", quota);
+expressApp.post("/v1/execute", express.json(), execute);
+expressApp.post("/v1/quota", express.json(), quota);
 // Approval endpoints.
 expressApp.get("/v1/approvals/:address", getApprovals);
 // Stripe endpoints.
-expressApp.post("/v1/stripe/session", createSession);
+expressApp.post("/v1/stripe/session", express.json(), createSession);
 // Stripe webhooks.
-expressApp.post("/webhook", webhooks);
+expressApp.post(
+  "/webhook",
+  express.raw({ type: "application/json" }),
+  webhooks
+);
 
 // Error handler middleware should be last.
 expressApp.use((err: string, req: Request, res: Response, next: any) => {
