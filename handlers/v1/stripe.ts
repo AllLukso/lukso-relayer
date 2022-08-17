@@ -6,6 +6,7 @@ export async function createSession(
   res: Response,
   next: NextFunction
 ) {
+  // TODO: Use signed message here to verify that a user who owns the up is attempting to sign up for a subscription.
   const { priceId, upAddress } = req.body;
   const session = await createStripeSession(priceId, upAddress);
   res.json({ url: session.url! });
@@ -52,10 +53,13 @@ export async function webhooks(
           data.object.client_reference_id,
           data.object.customer,
           "basic",
-          data.object.status,
+          data.object.payment_status,
         ]
       );
-      // Provision
+      await db.none(
+        "UPDATE quotas set monthly_gas = 1600000 WHERE universal_profile_address = $1",
+        data.object.client_reference_id
+      );
       console.log("session completed");
       break;
     case "invoice.paid":
