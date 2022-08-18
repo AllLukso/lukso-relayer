@@ -12,6 +12,7 @@ import {
   webhooks,
   createPortalSession,
 } from "./handlers/v1/stripe";
+import { getSubscription } from "./handlers/v1/subscription";
 
 const expressApp: Express = express();
 
@@ -43,6 +44,8 @@ expressApp.post("/v1/execute", express.json(), execute);
 expressApp.post("/v1/quota", express.json(), quota);
 // Approval endpoints.
 expressApp.get("/v1/approvals/:address", getApprovals);
+// Subscription endpoints.
+expressApp.get("/v1/subscriptions/:upAddress", express.json(), getSubscription);
 // Stripe endpoints.
 expressApp.post("/v1/stripe/session", express.json(), createSession);
 expressApp.post("/v1/stripe/portal", express.json(), createPortalSession);
