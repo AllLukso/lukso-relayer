@@ -65,6 +65,16 @@ export async function createStripeSession(
   return session;
 }
 
+export async function createStripePortalSession(
+  customerId: string,
+  returnUrl: string
+) {
+  return await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: returnUrl,
+  });
+}
+
 export async function constructEvent(
   body: any,
   signature: any,

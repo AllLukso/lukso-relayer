@@ -1,5 +1,10 @@
 import { Request, Response, NextFunction, request } from "express";
-import { createStripeSession, constructEvent } from "../../services/stripe";
+import {
+  createStripeSession,
+  constructEvent,
+  createStripePortalSession,
+} from "../../services/stripe";
+import PG from "pg-promise";
 
 export async function createSession(
   req: Request,
@@ -12,12 +17,40 @@ export async function createSession(
   res.json({ url: session.url! });
 }
 
+export async function createPortalSession(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    let { returnUrl, upAddress } = req.body;
+
+    const db = req.app.get("db");
+    const subscriptions = await db.any(
+      "SELECT * FROM subscriptions WHERE universal_profile_address = $1",
+      upAddress
+    );
+
+    if (!subscriptions) throw "no subscriptions";
+    if (!returnUrl) returnUrl = "http://localhost:3001/";
+
+    const portalSession = await createStripePortalSession(
+      subscriptions[0].stripe_user_id,
+      returnUrl
+    );
+    res.json({ url: portalSession.url! });
+  } catch (err) {
+    console.log(err);
+    next("failed to create portal session");
+  }
+}
+
 export async function webhooks(
   req: Request,
   res: Response,
   next: NextFunction
 ) {
-  let data;
+  let data: any;
   let eventType;
   const db = req.app.get("db");
   // Check if webhook signing is configured.
@@ -73,8 +106,55 @@ export async function webhooks(
     case "invoice.payment_failed":
       // The payment failed or the customer does not have a valid payment method.
       // The subscription becomes past_due. Notify your customer and send them to the
-      // customer portal to update their payment information.
+      // customer portal to update their payment information
+
+      await db.task(async (t: PG.ITask<{}>) => {
+        await t.none(
+          "UPDATE subscriptions SET status = $1 WHERE stripe_user_id = $2",
+          [data.status, data.customer]
+        );
+
+        const subscriptions = await t.any(
+          "SELECT * FROM subscriptions WHERE stripe_user_id = $1",
+          data.customer
+        );
+
+        if (!subscriptions) return;
+
+        const upAddress = subscriptions[0].universal_profile_address;
+        await t.none(
+          "UPDATE quotas SET monthly_gas = 650000 WHERE universal_profile_address = $1",
+          upAddress
+        );
+      });
+
       console.log("failed invoice pay");
+      break;
+    case "customer.subscription.deleted":
+      const customer = data.object.customer;
+      const status = data.object.status;
+
+      await db.task(async (t: PG.ITask<{}>) => {
+        await t.none(
+          "UPDATE subscriptions SET status = $1 WHERE stripe_user_id = $2",
+          [status, customer]
+        );
+
+        const subscriptions = await t.any(
+          "SELECT * FROM subscriptions WHERE stripe_user_id = $1",
+          customer
+        );
+
+        if (!subscriptions) return;
+
+        const upAddress = subscriptions[0].universal_profile_address;
+        await t.none(
+          "UPDATE quotas SET monthly_gas = 650000 WHERE universal_profile_address = $1",
+          upAddress
+        );
+      });
+
+      console.log("customer deleted subscription");
       break;
     default:
     // Unhandled event type

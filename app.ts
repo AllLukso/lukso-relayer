@@ -7,7 +7,11 @@ import "./services/stripe";
 // Handlers.
 import { execute, quota } from "./handlers/v1/transaction";
 import { get as getApprovals } from "./handlers/v1/approvals";
-import { createSession, webhooks } from "./handlers/v1/stripe";
+import {
+  createSession,
+  webhooks,
+  createPortalSession,
+} from "./handlers/v1/stripe";
 
 const expressApp: Express = express();
 
@@ -20,6 +24,7 @@ import "./jobs/transaction/execute";
 
 // Cron.
 import "./cron/pending_transactions";
+import { createStripePortalSession } from "./services/stripe";
 
 declare global {
   namespace Express {
@@ -40,6 +45,7 @@ expressApp.post("/v1/quota", express.json(), quota);
 expressApp.get("/v1/approvals/:address", getApprovals);
 // Stripe endpoints.
 expressApp.post("/v1/stripe/session", express.json(), createSession);
+expressApp.post("/v1/stripe/portal", express.json(), createPortalSession);
 // Stripe webhooks.
 expressApp.post(
   "/webhook",
