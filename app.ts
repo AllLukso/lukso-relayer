@@ -6,7 +6,12 @@ import "./services/stripe";
 
 // Handlers.
 import { execute, quota } from "./handlers/v1/transaction";
-import { get as getApprovals } from "./handlers/v1/approvals";
+import {
+  get as getApprovals,
+  create as createApproval,
+  destroy as destroyApproval,
+  destroy,
+} from "./handlers/v1/approvals";
 import {
   createSession,
   webhooks,
@@ -44,6 +49,8 @@ expressApp.post("/v1/execute", express.json(), execute);
 expressApp.post("/v1/quota", express.json(), quota);
 // Approval endpoints.
 expressApp.get("/v1/approvals/:address", getApprovals);
+expressApp.post("/v1/approvals", express.json(), createApproval);
+expressApp.post("/v1/approvals/delete", express.json(), destroyApproval);
 // Subscription endpoints.
 expressApp.get("/v1/subscriptions/:upAddress", express.json(), getSubscription);
 // Stripe endpoints.

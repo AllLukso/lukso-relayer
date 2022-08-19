@@ -1,20 +1,17 @@
 import dotenv from "dotenv";
 import KeyManagerContract from "@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json";
 import UniversalProfileContract from "@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json";
-import { ERC725 } from "@erc725/erc725.js";
-import LSP6Schema from "@erc725/erc725.js/schemas/LSP6KeyManager.json";
 import PG from "pg-promise";
 import { Request, Response, NextFunction } from "express";
 import { ethers } from "ethers";
-import Web3 from "web3";
 import Quota from "../../types/quota";
 import txQueue from "../../jobs/transaction/queue";
+import { checkSignerPermissions } from "../../utils";
 dotenv.config();
 
 const CHAIN_ID = process.env.CHAIN_ID;
 const RPC_URL = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PK;
-const web3 = new Web3(RPC_URL!);
 const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const wallet = new ethers.Wallet(PRIVATE_KEY!, provider);
 
@@ -181,18 +178,6 @@ async function setUpKeyManager(address: string) {
     wallet
   );
   return { kmAddress, keyManager };
-}
-
-async function checkSignerPermissions(address: string, signerAddress: string) {
-  // @ts-ignore
-  const erc725 = new ERC725(LSP6Schema, address, web3.currentProvider);
-  const addressPermission = await erc725.getData({
-    keyName: "AddressPermissions:Permissions:<address>",
-    dynamicKeyParts: signerAddress,
-  });
-  // @ts-ignore
-  const decodedPermission = erc725.decodePermissions(addressPermission.value);
-  if (!decodedPermission["SIGN"]) throw "signer missing sign permissions";
 }
 
 export async function quota(req: Request, res: Response, next: NextFunction) {
