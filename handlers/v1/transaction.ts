@@ -15,6 +15,23 @@ const PRIVATE_KEY = process.env.PK;
 const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const wallet = new ethers.Wallet(PRIVATE_KEY!, provider);
 
+export async function list(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { upAddress } = req.params;
+    const db = req.app.get("db");
+
+    const transactions = await db.any(
+      "SELECT * FROM transactions WHERE universal_profile_address = $1",
+      upAddress
+    );
+
+    res.json({ transactions });
+  } catch (err) {
+    console.log(err);
+    next("failed to list transactions");
+  }
+}
+
 export async function execute(req: Request, res: Response, next: NextFunction) {
   try {
     const address: string = req.body.address;

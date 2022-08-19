@@ -5,7 +5,11 @@ import cors from "cors";
 import "./services/stripe";
 
 // Handlers.
-import { execute, quota } from "./handlers/v1/transaction";
+import {
+  execute,
+  quota,
+  list as listTransactions,
+} from "./handlers/v1/transaction";
 import {
   get as getApprovals,
   create as createApproval,
@@ -47,6 +51,7 @@ expressApp.use(cors());
 // Transaction endpoints.
 expressApp.post("/v1/execute", express.json(), execute);
 expressApp.post("/v1/quota", express.json(), quota);
+expressApp.get("/v1/transactions/:upAddress", listTransactions);
 // Approval endpoints.
 expressApp.get("/v1/approvals/:address", getApprovals);
 expressApp.post("/v1/approvals", express.json(), createApproval);
