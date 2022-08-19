@@ -28,9 +28,6 @@ export async function get(req: Request, res: Response, next: NextFunction) {
 export async function create(req: Request, res: Response, next: NextFunction) {
   try {
     const { approvedAddress, approverAddress, signature } = req.body;
-    // TODO: Check that the approverAddress has control of the UP it is approving spend for.
-
-    // 1. Require user to send signed transaction
     const message = ethers.utils.solidityKeccak256(
       ["string"],
       [`I approve ${approvedAddress} to use my quota`]
@@ -62,19 +59,16 @@ export async function destroy(req: Request, res: Response, next: NextFunction) {
   try {
     const { approvedAddress, approverAddress, signature } = req.body;
 
-    // 1. Require user to send signed transaction
     const message = ethers.utils.solidityKeccak256(
       ["string"],
       [`I revoke ${approvedAddress} to use my quota`]
     );
 
-    // Need to arrayify here to get correct address.
     const signerAddress = ethers.utils.verifyMessage(
       ethers.utils.arrayify(message),
       signature
     );
     await checkSignerPermissions(approverAddress, signerAddress);
-    // Getting past the above check means this signer can approve spend for the UP
 
     const db = req.app.get("db");
 
@@ -89,3 +83,5 @@ export async function destroy(req: Request, res: Response, next: NextFunction) {
     next("failed to delete approval");
   }
 }
+
+// TODO: Change approval stuff to allow someone so choose how much of their quota to allow someone else to use instead of allowing them to use all of it.

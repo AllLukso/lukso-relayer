@@ -16,10 +16,7 @@ export async function checkSignerPermissions(
     dynamicKeyParts: signerAddress,
   });
 
-  console.log("signerAddress: ", signerAddress);
-  console.log("address: ", address);
   // @ts-ignore
   const decodedPermission = erc725.decodePermissions(addressPermission.value);
-  console.log("decoded: ", decodedPermission);
   if (!decodedPermission["SIGN"]) throw "signer missing sign permissions";
 }
