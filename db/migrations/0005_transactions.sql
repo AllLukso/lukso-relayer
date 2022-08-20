@@ -12,6 +12,8 @@ CREATE TABLE transactions(
   relayer_address VARCHAR(100),
   estimated_gas INT,
   gas_used INT,
+  approved_quota_id INT,
   FOREIGN KEY(universal_profile_address) REFERENCES universal_profiles(address),
+  FOREIGN KEY(approved_quota_id) REFERENCES approved_quotas(id),
   UNIQUE (nonce, channel_id, signer_address)
 );

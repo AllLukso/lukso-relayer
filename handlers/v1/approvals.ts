@@ -14,7 +14,7 @@ export async function get(req: Request, res: Response, next: NextFunction) {
     const db = req.app.get("db");
 
     const approvals = await db.any(
-      "SELECT * FROM approved_universal_profiles WHERE approver_address = $1",
+      "SELECT * FROM approved_quotas WHERE approver_address = $1",
       address
     );
 
@@ -27,7 +27,8 @@ export async function get(req: Request, res: Response, next: NextFunction) {
 
 export async function create(req: Request, res: Response, next: NextFunction) {
   try {
-    const { approvedAddress, approverAddress, signature } = req.body;
+    const { approvedAddress, approverAddress, signature, monthly_gas } =
+      req.body;
     const message = ethers.utils.solidityKeccak256(
       ["string"],
       [`I approve ${approvedAddress} to use my quota`]
@@ -39,13 +40,13 @@ export async function create(req: Request, res: Response, next: NextFunction) {
       signature
     );
     await checkSignerPermissions(approverAddress, signerAddress);
-    // Getting pas the above check means this signer can approve spend for the UP
+    // Getting past the above check means this signer can approve spend for the UP
 
     const db = req.app.get("db");
 
     const approval = await db.one(
-      "INSERT INTO approved_universal_profiles(approver_address, approved_address) VALUES($1, $2) RETURNING *",
-      [approverAddress, approvedAddress]
+      "INSERT INTO approved_quotas(approver_address, approved_address, monthly_gas, gas_used) VALUES($1, $2, $3, $4) RETURNING *",
+      [approverAddress, approvedAddress, monthly_gas, 0]
     );
 
     res.json({ approval });
@@ -73,7 +74,7 @@ export async function destroy(req: Request, res: Response, next: NextFunction) {
     const db = req.app.get("db");
 
     await db.none(
-      "DELETE FROM approved_universal_profiles WHERE approver_address = $1 and approved_address = $2",
+      "DELETE FROM approved_quotas WHERE approver_address = $1 and approved_address = $2",
       [approverAddress, approvedAddress]
     );
 
@@ -83,5 +84,3 @@ export async function destroy(req: Request, res: Response, next: NextFunction) {
     next("failed to delete approval");
   }
 }
-
-// TODO: Change approval stuff to allow someone so choose how much of their quota to allow someone else to use instead of allowing them to use all of it.

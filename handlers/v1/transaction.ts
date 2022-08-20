@@ -112,8 +112,15 @@ async function createTransaction(
       estimatedGas,
       quota.id,
     ]);
+
+    // TODO: Working on update the approved quota stuff, haven't touched the job yet
+
+    const approvedQuota = await t.one(
+      "UPDATE approved_quotas SET gas_used = gas_used + $1 WHERE approved_address = $2 and approver_address = $3 RETURNING *",
+      [estimatedGas, address, quota.universal_profile_address]
+    );
     return await t.one(
-      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used, hash) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
+      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used, hash, approved_quota_id) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *",
       [
         address,
         nonce,
@@ -127,6 +134,7 @@ async function createTransaction(
         estimatedGas,
         0,
         hash,
+        approvedQuota.id,
       ]
     );
   });
@@ -218,7 +226,7 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
     );
     await checkSignerPermissions(address, signerAddress);
 
-    const { transactionQuota, approvedQuotas } = await db.task(
+    const { transactionQuota, approvedQuotas, parentQuotas } = await db.task(
       async (t: PG.ITask<{}>) => {
         let transactionQuota;
         transactionQuota = await t.oneOrNone(
@@ -233,36 +241,48 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
           );
         }
 
-        const approvedUPs = await t.any(
-          "SELECT * FROM approved_universal_profiles WHERE approved_address = $1",
+        const approvedQuotas = await t.any(
+          "SELECT * FROM approved_quotas WHERE approved_address = $1",
           address
         );
-        let approvedQuotas;
-        if (approvedUPs && approvedUPs.length > 0) {
-          const approverAddresses = approvedUPs.map(
+        let parentQuotas;
+        if (approvedQuotas && approvedQuotas.length > 0) {
+          const approverAddresses = approvedQuotas.map(
             (aup) => aup.approver_address
           );
-          approvedQuotas = await t.any(
+          parentQuotas = await t.any(
             "SELECT * FROM quotas WHERE universal_profile_address IN ($1:csv)",
             [approverAddresses]
           );
         }
-        return { transactionQuota, approvedQuotas };
+        return { transactionQuota, approvedQuotas, parentQuotas };
       }
     );
 
-    // TODO: Need to add a quota amount to the approved_universal_profiles table, that keep strack of how much of each quota this contract can use.
     let totalQuota = transactionQuota.monthly_gas;
     let gasUsed = transactionQuota.gas_used;
     if (approvedQuotas && approvedQuotas.length > 0) {
-      totalQuota = approvedQuotas.reduce(
-        (acc: number, aq: any) => aq.monthly_gas + acc,
-        totalQuota
-      );
-      gasUsed = approvedQuotas.reduce(
-        (acc: number, aq: any) => aq.gas_used + acc,
-        gasUsed
-      );
+      approvedQuotas.forEach((aQuota: any) => {
+        const parentQuota = parentQuotas.find(
+          (pQuota: any) =>
+            pQuota.universal_profile_address === aQuota.approver_address
+        );
+        if (!parentQuota) return;
+        // Although this is an approved quota the parent doesn't have any gas to pay so we can't count it.
+        if (parentQuota.gas_used >= parentQuota.monthly_gas) return;
+        // Calculate how much of the approved quota the parent can afford.
+        const parentGasRemaining =
+          parentQuota.monthly_gas - parentQuota.gas_used;
+        const approvedGasRemaining = aQuota.monthly_gas - aQuota.gas_used;
+        if (parentGasRemaining >= approvedGasRemaining) {
+          // Parent has enough gas to pay add all to the total
+          totalQuota += aQuota.monthly_gas;
+        } else {
+          // Parent doesn't have enough to cover what they approved, but can still pay for some.
+          totalQuota += parentGasRemaining;
+        }
+        gasUsed += aQuota.gas_used;
+      });
     }
 
     const date = new Date();
@@ -331,7 +351,7 @@ async function ensureRemainingQuota(
 
     // Making it here means they are out of gas on the main UP
     const approvedUniversalProfiles = await t.any(
-      "SELECT * FROM approved_universal_profiles WHERE approved_address = $1",
+      "SELECT * FROM approved_quotas WHERE approved_address = $1",
       address
     );
     if (approvedUniversalProfiles.length === 0) throw "gas limit reached";
