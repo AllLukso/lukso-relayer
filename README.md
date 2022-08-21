@@ -12,4 +12,9 @@ Run `npm i` to install all dependencies.
 
 Replace `example.env` with `.env` and fill in with values
 
-Run `tsc` to compile then `npm start` to start the server.
+Run `npm run dev` to start the server.
+
+Dependencies:
+
+1. Redis for job queues
+2. Postgres db
