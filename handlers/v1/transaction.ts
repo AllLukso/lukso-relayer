@@ -113,9 +113,7 @@ async function createTransaction(
       quota.id,
     ]);
 
-    // TODO: Working on update the approved quota stuff, haven't touched the job yet
-
-    const approvedQuota = await t.one(
+    const approvedQuota = await t.oneOrNone(
       "UPDATE approved_quotas SET gas_used = gas_used + $1 WHERE approved_address = $2 and approver_address = $3 RETURNING *",
       [estimatedGas, address, quota.universal_profile_address]
     );
@@ -134,7 +132,7 @@ async function createTransaction(
         estimatedGas,
         0,
         hash,
-        approvedQuota.id,
+        approvedQuota?.id,
       ]
     );
   });
@@ -350,17 +348,22 @@ async function ensureRemainingQuota(
     if (quota.gas_used + estimatedGas <= quota.monthly_gas) return quota;
 
     // Making it here means they are out of gas on the main UP
-    const approvedUniversalProfiles = await t.any(
+    const approvedQuotas = await t.any(
       "SELECT * FROM approved_quotas WHERE approved_address = $1",
       address
     );
-    if (approvedUniversalProfiles.length === 0) throw "gas limit reached";
+    if (approvedQuotas.length === 0) throw "gas limit reached";
 
     // Get the quota of the UP that approved this UP
-    for (let i = 0; i < approvedUniversalProfiles.length; i++) {
+    for (let i = 0; i < approvedQuotas.length; i++) {
+      if (
+        approvedQuotas[i].gas_used + estimatedGas >=
+        approvedQuotas[i].monthly_gas
+      )
+        continue;
       quota = await t.oneOrNone(
         "SELECT * FROM quotas WHERE universal_profile_address = $1",
-        approvedUniversalProfiles[i].approver_address
+        approvedQuotas[i].approver_address
       );
       // Found a quota with enough gas to run the transaction
       if (quota.gas_used + estimatedGas <= quota.monthly_gas) break;

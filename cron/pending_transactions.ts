@@ -30,6 +30,17 @@ new CronJob({
             transaction.universal_profile_address,
           ]
         );
+
+        if (transaction.approved_quota_id) {
+          await t.none(
+            "UPDATE approved_quotas SET gas_used = gas_used - $1 + $2 WHERE id = $3",
+            [
+              transaction.estimated_gas,
+              receipt.gasUsed.toNumber(),
+              transaction.approved_quota_id,
+            ]
+          );
+        }
       });
     });
   },
