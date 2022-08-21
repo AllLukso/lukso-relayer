@@ -21,7 +21,7 @@ export async function list(req: Request, res: Response, next: NextFunction) {
     const db = req.app.get("db");
 
     const transactions = await db.any(
-      "SELECT * FROM transactions WHERE universal_profile_address = $1",
+      "SELECT * FROM transactions WHERE universal_profile_address = $1 ORDER BY created_at DESC",
       upAddress
     );
 
@@ -117,8 +117,9 @@ async function createTransaction(
       "UPDATE approved_quotas SET gas_used = gas_used + $1 WHERE approved_address = $2 and approver_address = $3 RETURNING *",
       [estimatedGas, address, quota.universal_profile_address]
     );
+    const date = new Date().toISOString();
     return await t.one(
-      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used, hash, approved_quota_id) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *",
+      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used, hash, approved_quota_id, created_at, updated_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *",
       [
         address,
         nonce,
@@ -133,6 +134,8 @@ async function createTransaction(
         0,
         hash,
         approvedQuota?.id,
+        date,
+        date,
       ]
     );
   });

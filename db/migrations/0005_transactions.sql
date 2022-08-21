@@ -13,6 +13,8 @@ CREATE TABLE transactions(
   estimated_gas INT,
   gas_used INT,
   approved_quota_id INT,
+  updated_at TIMESTAMP,
+  created_at TIMESTAMP,
   FOREIGN KEY(universal_profile_address) REFERENCES universal_profiles(address),
   FOREIGN KEY(approved_quota_id) REFERENCES approved_quotas(id),
   UNIQUE (nonce, channel_id, signer_address)
