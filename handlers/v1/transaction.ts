@@ -7,6 +7,7 @@ import { ethers } from "ethers";
 import Quota from "../../types/quota";
 import txQueue from "../../jobs/transaction/queue";
 import { checkSignerPermissions } from "../../utils";
+import ArgumentError from "../../types/argumentError";
 dotenv.config();
 
 const CHAIN_ID = process.env.CHAIN_ID;
@@ -35,9 +36,9 @@ export async function list(req: Request, res: Response, next: NextFunction) {
 export async function execute(req: Request, res: Response, next: NextFunction) {
   try {
     const address: string = req.body.address;
-    const nonce: string = req.body.transaction.nonce;
-    const abi: string = req.body.transaction.abi;
-    const signature: string = req.body.transaction.signature;
+    const nonce: string = req.body.transaction?.nonce;
+    const abi: string = req.body.transaction?.abi;
+    const signature: string = req.body.transaction?.signature;
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
@@ -71,7 +72,11 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     res.json({ transactionHash: hash });
   } catch (err) {
     console.log(err);
-    next("Failed to execute");
+    if (err instanceof ArgumentError) {
+      next(err.message);
+    } else {
+      next("Failed to execute");
+    }
   }
 }
 
@@ -321,10 +326,14 @@ function validateExecuteParams(
   abi: string,
   sig: string
 ): void {
-  if (address === undefined || address === "") throw "address must be present";
-  if (nonce === undefined || nonce === "") throw "nonce must be present";
-  if (abi === undefined || abi === "") throw "abi must be present";
-  if (sig === undefined || sig === "") throw "signature must be present";
+  if (address === undefined || address === "")
+    throw new ArgumentError("address must be present");
+  if (nonce === undefined || nonce === "")
+    throw new ArgumentError("nonce must be present");
+  if (abi === undefined || abi === "")
+    throw new ArgumentError("abi must be present");
+  if (sig === undefined || sig === "")
+    throw new ArgumentError("signature must be present");
 }
 
 async function ensureRemainingQuota(
