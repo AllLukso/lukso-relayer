@@ -117,9 +117,8 @@ async function createTransaction(
       "UPDATE approved_quotas SET gas_used = gas_used + $1 WHERE approved_address = $2 and approver_address = $3 RETURNING *",
       [estimatedGas, address, quota.universal_profile_address]
     );
-    const date = new Date().toISOString();
     return await t.one(
-      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used, hash, approved_quota_id, created_at, updated_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *",
+      "INSERT INTO transactions(universal_profile_address, nonce, signature, abi, channel_id, status, signer_address, relayer_nonce, relayer_address, estimated_gas, gas_used, hash, approved_quota_id, created_at, updated_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()) RETURNING *",
       [
         address,
         nonce,
@@ -134,8 +133,6 @@ async function createTransaction(
         0,
         hash,
         approvedQuota?.id,
-        date,
-        date,
       ]
     );
   });
