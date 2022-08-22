@@ -236,6 +236,19 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
         );
 
         if (!transactionQuota) {
+          // First check if the UP has been initialize and if not then initialize it.
+          const up = await t.oneOrNone(
+            "SELECT * from universal_profiles WHERE address = $1",
+            address
+          );
+
+          if (!up) {
+            await t.none(
+              "INSERT INTO universal_profiles(address, created_at) VALUES($1, $2)",
+              [address, new Date()]
+            );
+          }
+
           transactionQuota = await t.one(
             "INSERT INTO quotas(universal_profile_address, monthly_gas, gas_used) VALUES($1, $2, $3) RETURNING *",
             [address, 650000, 0]
