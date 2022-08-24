@@ -1,16 +1,21 @@
 import dotenv from "dotenv";
-import KeyManagerContract from "@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json";
-import UniversalProfileContract from "@lukso/lsp-smart-contracts/artifacts/UniversalProfile.json";
+import {
+  setUpKeyManager,
+  getSignerAddress,
+  estimateGas,
+  getWalletNonce,
+  calcHash,
+} from "../../services/lukso";
 import PG from "pg-promise";
 import { Request, Response, NextFunction } from "express";
 import { ethers } from "ethers";
 import Quota from "../../types/quota";
 import txQueue from "../../jobs/transaction/queue";
 import { checkSignerPermissions } from "../../utils";
-import ArgumentError from "../../types/argumentError";
+import ArgumentError from "../../types/errors/argumentError";
+import NoGasError from "../../types/errors/noGasError";
 dotenv.config();
 
-const CHAIN_ID = process.env.CHAIN_ID;
 const RPC_URL = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PK;
 const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
@@ -42,14 +47,22 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     validateExecuteParams(address, nonce, abi, signature);
 
     const db = req.app.get("db");
-    const { kmAddress, keyManager } = await setUpKeyManager(address);
+    const { kmAddress, keyManager } = await setUpKeyManager(address, wallet);
     const signerAddress = getSignerAddress(kmAddress, nonce, abi, signature);
     await checkSignerPermissions(address, signerAddress);
     const estimatedGas = await estimateGas(keyManager, signature, nonce, abi);
+    if (!estimatedGas) throw "could not estimate gas";
     const quota = await ensureRemainingQuota(db, estimatedGas, address);
     const channelId = extractChannelId(nonce);
-    const walletNonce = await getWalletNonce(db);
-    const hash = await calcHash(keyManager, signature, nonce, abi, walletNonce);
+    const walletNonce = await getWalletNonce(db, wallet);
+    const hash = await calcHash(
+      keyManager,
+      signature,
+      nonce,
+      abi,
+      walletNonce,
+      wallet
+    );
 
     const transaction = await createTransaction(
       db,
@@ -74,29 +87,12 @@ export async function execute(req: Request, res: Response, next: NextFunction) {
     console.log(err);
     if (err instanceof ArgumentError) {
       next(err.message);
+    } else if (err instanceof NoGasError) {
+      next(err.message);
     } else {
       next("Failed to execute");
     }
   }
-}
-
-async function calcHash(
-  keyManager: ethers.Contract,
-  signature: string,
-  nonce: string,
-  abi: string,
-  walletNonce: number
-) {
-  const unsignedTx = await keyManager.populateTransaction.executeRelayCall(
-    signature,
-    nonce,
-    abi
-  );
-  const populatedUnsignedTx = await wallet.populateTransaction(unsignedTx);
-  populatedUnsignedTx.nonce = walletNonce;
-  const signedTx = await keyManager.signer.signTransaction(populatedUnsignedTx);
-  const parsedTx = ethers.utils.parseTransaction(signedTx);
-  return parsedTx.hash;
 }
 
 async function createTransaction(
@@ -143,69 +139,6 @@ async function createTransaction(
   });
   if (!transaction) throw "no transaction";
   return transaction;
-}
-
-async function getWalletNonce(db: any) {
-  const pendingWalletTransaction = await db.oneOrNone(
-    "SELECT * FROM transactions WHERE relayer_address = $1 AND status = 'PENDING' ORDER BY relayer_nonce DESC LIMIT 1",
-    [wallet.address]
-  );
-  let walletNonce: number;
-  if (pendingWalletTransaction) {
-    walletNonce = Number(pendingWalletTransaction.relayer_nonce) + 1;
-  } else {
-    walletNonce = await wallet.getTransactionCount();
-  }
-  return walletNonce;
-}
-
-async function estimateGas(
-  keyManager: ethers.Contract,
-  signature: string,
-  nonce: string,
-  abi: string
-) {
-  const estimatedGasBN = await keyManager.estimateGas.executeRelayCall(
-    signature,
-    nonce,
-    abi
-  );
-  const estimatedGas = estimatedGasBN.toNumber();
-  return estimatedGas;
-}
-
-function getSignerAddress(
-  kmAddress: any,
-  nonce: string,
-  abi: string,
-  signature: string
-) {
-  const message = ethers.utils.solidityKeccak256(
-    ["uint", "address", "uint", "bytes"],
-    [CHAIN_ID, kmAddress, nonce, abi]
-  );
-
-  // Need to arrayify here to get correct address.
-  const signerAddress = ethers.utils.verifyMessage(
-    ethers.utils.arrayify(message),
-    signature
-  );
-  return signerAddress;
-}
-
-async function setUpKeyManager(address: string) {
-  const universalProfileContract = new ethers.Contract(
-    address,
-    UniversalProfileContract.abi,
-    wallet
-  );
-  const kmAddress = await universalProfileContract.owner();
-  const keyManager = new ethers.Contract(
-    kmAddress,
-    KeyManagerContract.abi,
-    wallet
-  );
-  return { kmAddress, keyManager };
 }
 
 export async function quota(req: Request, res: Response, next: NextFunction) {
@@ -374,7 +307,7 @@ async function ensureRemainingQuota(
       "SELECT * FROM approved_quotas WHERE approved_address = $1",
       address
     );
-    if (approvedQuotas.length === 0) throw "gas limit reached";
+    if (approvedQuotas.length === 0) throw new NoGasError("gas limit reached");
 
     // Get the quota of the UP that approved this UP
     for (let i = 0; i < approvedQuotas.length; i++) {
@@ -391,9 +324,9 @@ async function ensureRemainingQuota(
       if (quota.gas_used + estimatedGas <= quota.monthly_gas) break;
     }
 
-    if (!quota) throw "gas limit reached";
+    if (!quota) throw new NoGasError("gas limit reached");
     if (quota.gas_used + estimatedGas > quota.monthly_gas)
-      throw "gas limit reached";
+      throw new NoGasError("gas limit reached");
     return quota;
   });
 }

@@ -4,8 +4,7 @@ dotenv.config();
 import KeyManagerContract from "@lukso/lsp-smart-contracts/artifacts/LSP6KeyManager.json";
 import { ethers } from "ethers";
 import db from "../../db";
-
-const transactionQueue = new Queue("transaction", process.env.REDIS_URL!);
+import transactionQueue from "./queue";
 
 const controllingAccountPrivateKey = process.env.PK;
 const rpcURL = process.env.RPC_URL;

@@ -34,7 +34,7 @@
   },
   "scripts": {
     "test": "jest",
-    "dev": "ts-node server.ts",
+    "dev": "ts-node src/server.ts",
     "start": "ts-node js/server.js",
     "build": "tsc -p ."
   }

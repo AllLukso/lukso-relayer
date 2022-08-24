@@ -14,7 +14,6 @@ import {
   get as getApprovals,
   create as createApproval,
   destroy as destroyApproval,
-  destroy,
 } from "./handlers/v1/approvals";
 import {
   createSession,

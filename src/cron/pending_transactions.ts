@@ -5,7 +5,7 @@ import { ethers } from "ethers";
 const CronJob = cron.CronJob;
 const provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL);
 
-new CronJob({
+export default new CronJob({
   cronTime: "0-59 * * * *",
   onTick: async function () {
     const pendingTransactions = await db.any(
