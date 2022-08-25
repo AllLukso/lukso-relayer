@@ -20,10 +20,6 @@ jest.mock("../../../jobs/transaction/queue");
 const upAddress = "0xtest";
 
 describe("/execute", () => {
-  afterAll(async () => {
-    await db.$pool.end();
-  });
-
   describe("with invalid params", () => {
     describe("when 'address' is missing", () => {
       test("it returns the correct error", async () => {
@@ -144,31 +140,55 @@ describe("/execute", () => {
           });
         });
 
-        describe("when the approved quota has enough gas to execute the tranasction", () => {
-          test("it creates the transaction", async () => {
-            mockLukso();
-            const response = await request(app)
-              .post("/v1/execute")
-              .send({
-                address: upAddress,
-                transaction: {
-                  abi: "test",
-                  signature: "test",
-                  nonce: 0,
-                },
-              });
-            expect(response.statusCode).toBe(200);
-            const transaction = await db.one(
-              "SELECT * FROM transactions WHERE universal_profile_address = $1",
-              upAddress
-            );
+        describe("when the approver's quota has enough gas to execute the tranasction", () => {
+          describe("when the approved quota has enough gas to execute the transaction", () => {
+            test("it creates the transaction", async () => {
+              mockLukso();
+              const response = await request(app)
+                .post("/v1/execute")
+                .send({
+                  address: upAddress,
+                  transaction: {
+                    abi: "test",
+                    signature: "test",
+                    nonce: 0,
+                  },
+                });
+              expect(response.statusCode).toBe(200);
+              const transaction = await db.one(
+                "SELECT * FROM transactions WHERE universal_profile_address = $1",
+                upAddress
+              );
 
-            expect(transaction.estimated_gas).toBe(65432);
-            expect(transaction.status).toBe("PENDING");
+              expect(transaction.estimated_gas).toBe(65432);
+              expect(transaction.status).toBe("PENDING");
+            });
+          });
+
+          describe("when the approved quota does not have enough gas to execute the transaction", () => {
+            beforeEach(async () => {
+              await db.none("UPDATE approved_quotas SET gas_used = 650000");
+            });
+
+            test("it returns the correct error", async () => {
+              mockLukso();
+              const response = await request(app)
+                .post("/v1/execute")
+                .send({
+                  address: upAddress,
+                  transaction: {
+                    abi: "test",
+                    signature: "test",
+                    nonce: 0,
+                  },
+                });
+              expect(response.statusCode).toBe(500);
+              expect(response.body.error).toBe("gas limit reached");
+            });
           });
         });
 
-        describe("when the approved quota does not have enough gas to execute the transaction", () => {
+        describe("when the approver's quota does not have enough gas to execute the transaction", () => {
           beforeEach(async () => {
             await db.none(
               "UPDATE quotas SET gas_used = 650000 WHERE universal_profile_address = '0xapprover'"
@@ -216,6 +236,118 @@ describe("/execute", () => {
 
         expect(transaction.estimated_gas).toBe(65432);
         expect(transaction.status).toBe("PENDING");
+      });
+    });
+  });
+});
+
+describe("/quota", () => {
+  afterEach(async () => {
+    await db.task(async (t) => {
+      await t.none("DELETE FROM quotas");
+      await t.none("DELETE FROM approved_quotas");
+      await t.none("DELETE FROM universal_profiles");
+    });
+  });
+
+  describe("with invalid params", () => {
+    describe("when address is missing", () => {
+      test("it returns the correct error", async () => {
+        const response = await request(app)
+          .post("/v1/quota")
+          .send({ timestamp: 1, signature: "abc" });
+        expect(response.status).toBe(500);
+        expect(response.body.error).toBe("address must be present");
+      });
+    });
+
+    describe("when timestamp is missing", () => {
+      test("it returns the correct error", async () => {
+        const response = await request(app)
+          .post("/v1/quota")
+          .send({ address: upAddress, signature: "abc" });
+        expect(response.status).toBe(500);
+        expect(response.body.error).toBe("timestamp must be present");
+      });
+    });
+
+    describe("when signature is missing", () => {
+      test("it returns the correct error", async () => {
+        const response = await request(app)
+          .post("/v1/quota")
+          .send({ address: upAddress, timestamp: 1 });
+        expect(response.status).toBe(500);
+        expect(response.body.error).toBe("signature must be present");
+      });
+    });
+
+    describe("when timestamp is +/- five seconds from current timestamp", () => {
+      test("it returns the correct error", async () => {
+        const response = await request(app)
+          .post("/v1/quota")
+          .send({ address: upAddress, timestamp: 1, signature: "abc" });
+        expect(response.status).toBe(500);
+        expect(response.body.error).toBe("timestamp must be +/- 5 seconds");
+      });
+    });
+  });
+
+  describe("with valid params", () => {
+    describe("when the up does not have a quota", () => {
+      test("it initialize a new up and quota", async () => {
+        const timestamp = new Date().getTime();
+        const response = await request(app).post("/v1/quota").send({
+          address: "0xcBD46606f1373B26795551657B8Ec5235FB13040",
+          timestamp: timestamp,
+          signature:
+            "0x05def6618f809120e6b4b2a55fe6b3e3bf73a72068fb1fa46371d94a9e368a131d28a6ce7bba50cbc4098372e532b00430f1a83cf1573d731825e0ee880378941c",
+        });
+        const date = new Date();
+        const firstOfNextMonth = new Date(
+          date.getFullYear(),
+          date.getMonth() + 1,
+          1
+        );
+        expect(response.status).toBe(200);
+        expect(response.body.quota).toBe(0);
+        expect(response.body.unit).toBe("gas");
+        expect(response.body.totalQuota).toBe(650000);
+        expect(response.body.resetDate).toBe(firstOfNextMonth.getTime());
+      });
+    });
+
+    describe("when the up already has a quota", () => {
+      beforeEach(async () => {
+        await db.none(
+          "INSERT INTO universal_profiles(address) VALUES($1)",
+          "0xcBD46606f1373B26795551657B8Ec5235FB13040"
+        );
+        // Create a quota to simulate a user being over their monthly gas limit.
+        await db.none(
+          "INSERT INTO quotas(universal_profile_address, monthly_gas, gas_used) VALUES($1, $2, $3)",
+          ["0xcBD46606f1373B26795551657B8Ec5235FB13040", 650000, 650000]
+        );
+      });
+
+      test("it returns the qutoa", async () => {
+        const timestamp = new Date().getTime();
+        const response = await request(app).post("/v1/quota").send({
+          address: "0xcBD46606f1373B26795551657B8Ec5235FB13040",
+          timestamp: timestamp,
+          signature:
+            "0x05def6618f809120e6b4b2a55fe6b3e3bf73a72068fb1fa46371d94a9e368a131d28a6ce7bba50cbc4098372e532b00430f1a83cf1573d731825e0ee880378941c",
+        });
+        const date = new Date();
+        const firstOfNextMonth = new Date(
+          date.getFullYear(),
+          date.getMonth() + 1,
+          1
+        );
+        expect(response.status).toBe(200);
+        expect(response.body.quota).toBe(650000);
+        expect(response.body.unit).toBe("gas");
+        expect(response.body.totalQuota).toBe(650000);
+        expect(response.body.resetDate).toBe(firstOfNextMonth.getTime());
       });
     });
   });

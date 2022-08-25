@@ -145,11 +145,12 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
   try {
     const db = req.app.get("db");
     const { address, timestamp, signature } = req.body;
+    validateQuotaParams(address, timestamp, signature);
 
     const now = new Date().getTime();
     const timeDiff = now - timestamp;
     if (timeDiff > 5000 || timeDiff < -5000)
-      throw "timestamp must be +/- 5 seconds";
+      throw new ArgumentError("timestamp must be +/- 5 seconds");
 
     const message = ethers.utils.solidityKeccak256(
       ["address", "uint"],
@@ -249,7 +250,11 @@ export async function quota(req: Request, res: Response, next: NextFunction) {
     });
   } catch (err) {
     console.log(err);
-    return next("failed to get quota");
+    if (err instanceof ArgumentError) {
+      return next(err.message);
+    } else {
+      return next("failed to get quota");
+    }
   }
 }
 
@@ -266,6 +271,19 @@ function validateExecuteParams(
   if (abi === undefined || abi === "")
     throw new ArgumentError("abi must be present");
   if (sig === undefined || sig === "")
+    throw new ArgumentError("signature must be present");
+}
+
+function validateQuotaParams(
+  address: string,
+  timestamp: number,
+  signature: string
+) {
+  if (address === undefined || address === "")
+    throw new ArgumentError("address must be present");
+  if (timestamp === undefined || timestamp === 0)
+    throw new ArgumentError("timestamp must be present");
+  if (signature === undefined || signature === "")
     throw new ArgumentError("signature must be present");
 }
 
