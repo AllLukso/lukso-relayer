@@ -294,7 +294,7 @@ describe("/quota", () => {
 
   describe("with valid params", () => {
     describe("when the up does not have a quota", () => {
-      test("it initialize a new up and quota", async () => {
+      test("it initializes a new up and quota", async () => {
         const timestamp = new Date().getTime();
         const response = await request(app).post("/v1/quota").send({
           address: "0xcBD46606f1373B26795551657B8Ec5235FB13040",
@@ -348,6 +348,12 @@ describe("/quota", () => {
         expect(response.body.unit).toBe("gas");
         expect(response.body.totalQuota).toBe(650000);
         expect(response.body.resetDate).toBe(firstOfNextMonth.getTime());
+      });
+
+      describe("when the up also has approved quota(s)", () => {
+        test.todo(
+          "it should add the approved quota to the total quota and quota fields correctly"
+        );
       });
     });
   });
