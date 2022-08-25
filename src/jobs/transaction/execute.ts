@@ -12,11 +12,16 @@ const provider = new ethers.providers.JsonRpcProvider(rpcURL);
 // TODO: Need to make sure we use the same wallet here that was used in trasaction.execute
 // When we start using multiple wallets, we can look up the private key using the relayer_address that was set when the transaction was created.
 // Each instance of the relayer will have a private key injected into it, we will need to know which relayer handled the initial request so we can have that same relayer job pick it up.
+// TODO: The above would probably be as easy as keeping a list of the private keys, then injecting the key id into the jobs params.
 const wallet = new ethers.Wallet(controllingAccountPrivateKey!, provider);
 
 transactionQueue.process(async (job: Queue.Job) => {
+  const { kmAddress, transactionId } = job.data;
+  handleExecute(kmAddress, transactionId);
+});
+
+export async function handleExecute(kmAddress: string, transactionId: string) {
   try {
-    const { kmAddress, transactionId } = job.data;
     const keyManager = new ethers.Contract(
       kmAddress,
       KeyManagerContract.abi,
@@ -60,4 +65,4 @@ transactionQueue.process(async (job: Queue.Job) => {
   } catch (err) {
     console.log(err);
   }
-});
+}
