@@ -4,6 +4,8 @@ A relayer that provides users with an easy onboarding experience to the lukso ne
 
 Front end repo: https://github.com/Rask467/lukso-relayer-frontend
 
+Demo video: https://www.youtube.com/watch?v=BcXSmy5yROc
+
 ![Architecture](architecture.jpeg)
 
 # Team
